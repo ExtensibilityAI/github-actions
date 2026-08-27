@@ -1,12 +1,13 @@
 name: Set deploy environment
 description: |
-  Resolve deploy environment and stack from event context.
-  mode=app: PR→staging, push→prod, workflow_dispatch→dispatch_environment.
-  mode=package: tag→prod, workflow_dispatch→dispatch_environment, otherwise staging.
+  Resolve deploy environment and stack from event context (CI is separate and
+  typically pins github_environment=staging for WIF only).
+  Both app and package: workflow_dispatch→input, pull_request→staging,
+  push/tag→prod.
 
 inputs:
   mode:
-    description: app or package
+    description: app or package (retained for caller clarity; selection rules are shared)
     required: true
   dispatch_environment:
     description: Environment from workflow_dispatch (staging or prod)
@@ -35,19 +36,11 @@ runs:
         set -euo pipefail
         if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
           ENV="${DISPATCH_ENV:-staging}"
-        elif [ "$MODE" = "package" ]; then
-          if [ "$REF_TYPE" = "tag" ]; then
-            ENV=prod
-          else
-            ENV=staging
-          fi
+        elif [ "$EVENT_NAME" = "pull_request" ]; then
+          ENV=staging
         else
-          # mode=app
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            ENV=staging
-          else
-            ENV=prod
-          fi
+          # push to main, tags, etc. → prod
+          ENV=prod
         fi
         echo "env=$ENV" >> "$GITHUB_OUTPUT"
         echo "stack=$ENV" >> "$GITHUB_OUTPUT"

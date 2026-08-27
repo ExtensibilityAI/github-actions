@@ -10,7 +10,7 @@ Centralize CI/CD patterns (GCP GKE/Helm deploy, package publish, Pulumi) so prod
 
 | Control | Rule |
 | --- | --- |
-| Visibility | This repository is **public code-only** (no secrets in the repo). |
+| Visibility | Intended **public code-only** once the hardening bar passes (currently private; org Actions access enabled for ExtensibilityAI callers). No secrets in the repo. |
 | Pinning | Callers **must** pin with a release tag (`@v1.x.y`) or commit SHA — never `@main`. |
 | Identity | GCP Workload Identity Federation must require `attribute.repository` (and prefer repo allowlists). |
 | Secrets | No long-lived cloud keys in GitHub secrets for GCP; use WIF. Pulumi / GitHub App secrets stay in caller environments. |
@@ -64,8 +64,10 @@ actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`).
 | `resolve-pulumi-org` | `uv run infra utils resolve-pulumi-org` |
 | `detect-changes` | `uv run infra utils detect-changes` (+ `app_must_finish_first`) |
 | `install-cloud-sql-proxy` | Download + SHA256 verify proxy to `/usr/local/bin` |
-| `set-deploy-env` | Resolve `env` / `stack` for app or package mode |
+| `set-deploy-env` | Resolve `env` / `stack`: PR→staging, push/tag→prod, dispatch→input |
 | `docker-build-push` | WIF build/push with `:latest` cache and change detection |
+
+**CI vs deploy environments:** Package/app **CI** workflows use a GitHub Environment (default `staging`) only to load WIF vars for private PyPI during tests — they do not deploy. **Deploy/publish** workflows call `set-deploy-env` so pushes to `main` and tags use `prod`, while pull requests use `staging`.
 
 ## Reusable workflows
 
