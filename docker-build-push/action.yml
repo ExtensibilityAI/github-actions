@@ -57,9 +57,10 @@ outputs:
 runs:
   using: composite
   steps:
+    # Must be fully-qualified: relative ./ paths resolve in the *caller* workspace, not this repo.
     - name: Setup PyPI auth
       if: inputs.needs_pypi_auth == 'true'
-      uses: ./setup-pypi-auth
+      uses: ExtensibilityAI/github-actions/setup-pypi-auth@v1.0.2
       with:
         wif_provider: ${{ inputs.wif_provider }}
         pypi_sa: ${{ inputs.pypi_sa }}
