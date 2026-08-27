@@ -28,7 +28,7 @@ Centralize CI/CD patterns (GCP GKE/Helm deploy, package publish, Pulumi) so prod
 - Moving major tag: `v1` points at the latest `v1.x.y`
 - Callers: `ExtensibilityAI/github-actions/<action>@v1.0.0` or reusable workflow path `@v1.0.0`
 
-Release via Actions → **Release** → `workflow_dispatch` with version input (main only).
+Release via Actions → **Release** → `workflow_dispatch` with version input (from `main` or `trunk`).
 
 ## How to bump third-party action SHAs
 
