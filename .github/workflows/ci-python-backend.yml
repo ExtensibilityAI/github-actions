@@ -102,9 +102,13 @@ jobs:
           set -euo pipefail
           if [ -d scripts ]; then
             find scripts -type f -name '*.sh' -print0 | xargs -0 -r bash -n
-          else
-            echo "No scripts/ directory; skipping bash -n"
           fi
+          for f in entrypoint.sh init.sh; do
+            if [ -f "$f" ]; then
+              bash -n "$f"
+            fi
+          done
+          echo "bash -n OK"
       - name: docker compose config
         run: |
           set -euo pipefail

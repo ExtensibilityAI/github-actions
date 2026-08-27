@@ -120,6 +120,16 @@ on:
         type: string
         required: false
         default: ''
+      helm_repo_name:
+        description: Optional helm repo name to add before upgrade (e.g. superset)
+        type: string
+        required: false
+        default: ''
+      helm_repo_url:
+        description: Optional helm repo URL (required when helm_repo_name is set)
+        type: string
+        required: false
+        default: ''
 
       run_migrations:
         type: boolean
@@ -445,6 +455,12 @@ jobs:
           DATABASE_PASSWORD: ${{ steps.db-secret.outputs.password }}
           DATABASE_NAME: ${{ inputs.db_name }}
           DATABASE_PORT: 5432
+          # Optional app-specific vars (harmless when unset; used by scaffolder alembic/config)
+          SCAFFOLDER_GITHUB_ORG: ${{ vars.SCAFFOLDER_GITHUB_ORG }}
+          SCAFFOLDER_GITHUB_APP_ID: ${{ vars.SCAFFOLDER_GITHUB_APP_ID }}
+          SCAFFOLDER_GITHUB_APP_INSTALLATION_ID: ${{ vars.SCAFFOLDER_GITHUB_APP_INSTALLATION_ID }}
+          SCAFFOLDER_GITHUB_APP_CLIENT_ID: ${{ vars.SCAFFOLDER_GITHUB_APP_CLIENT_ID }}
+          SCAFFOLDER_GITHUB_APP_PRIVATE_KEY_PEM: ${{ secrets.SCAFFOLDER_GITHUB_APP_PRIVATE_KEY_PEM }}
         run: |
           set -euo pipefail
           CONNECTION_NAME="${{ env.PROJECT_ID }}:${{ env.REGION }}:${{ env.INSTANCE_NAME }}"
@@ -529,8 +545,14 @@ jobs:
           CHART: ${{ inputs.helm_chart }}
           IMAGE_SUFFIX: ${{ inputs.helm_image_repository_suffix }}
           EXTRA_SET: ${{ inputs.helm_extra_set }}
+          REPO_NAME: ${{ inputs.helm_repo_name }}
+          REPO_URL: ${{ inputs.helm_repo_url }}
         run: |
           set -euo pipefail
+          if [ -n "${REPO_NAME:-}" ] && [ -n "${REPO_URL:-}" ]; then
+            helm repo add "$REPO_NAME" "$REPO_URL" || true
+            helm repo update "$REPO_NAME" || helm repo update || true
+          fi
           REGISTRY="${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/docker-images"
           IMAGE_REPO="${REGISTRY}/${IMAGE_SUFFIX}"
           SET_ARGS=(--set "image.repository=${IMAGE_REPO}" --set "image.tag=${SHA}")
@@ -540,4 +562,9 @@ jobs:
             EXTRA=( $EXTRA_SET )
             SET_ARGS+=("${EXTRA[@]}")
           fi
-          helm upgrade --install "$RELEASE" "$CHART" -n "$NS" "${SET_ARGS[@]}" --wait --timeout 5m
+          RELEASE_NAME="${RELEASE:-${{ vars.HELM_RELEASE }}}"
+          if [ -z "$RELEASE_NAME" ]; then
+            echo "::error::helm_release input or HELM_RELEASE var required"
+            exit 1
+          fi
+          helm upgrade --install "$RELEASE_NAME" "$CHART" -n "$NS" "${SET_ARGS[@]}" --wait --timeout 5m
