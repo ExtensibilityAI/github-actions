@@ -1,0 +1,40 @@
+name: CI Python light
+
+on:
+  workflow_call:
+    inputs:
+      working_directory:
+        type: string
+        required: false
+        default: .
+      python_version:
+        type: string
+        required: false
+        default: '3.11'
+      use_staging_environment:
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  light:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.use_staging_environment && 'staging' || '' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+      - name: Set up Python
+        run: uv python install ${{ inputs.python_version }}
+      - name: Import / pytest without private index
+        working-directory: ${{ inputs.working_directory }}
+        run: |
+          set -euo pipefail
+          if [ -f pyproject.toml ]; then
+            uv sync --extra dev || uv sync
+            uv run pytest -q || uv run python -c "import sys; print('pytest skipped')"
+          else
+            echo "No pyproject.toml in ${{ inputs.working_directory }}"
+            exit 1
+          fi

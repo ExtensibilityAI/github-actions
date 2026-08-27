@@ -33,7 +33,7 @@ jobs:
       env: ${{ steps.env.outputs.env }}
       stack: ${{ steps.env.outputs.stack }}
     steps:
-      - uses: ExtensibilityAI/github-actions/set-deploy-env@v1.0.0
+      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.0.0
         id: env
         with:
           mode: package
@@ -60,7 +60,7 @@ jobs:
         run: uv python install ${{ inputs.python_version }}
 
       - name: Authenticate to GCP for PyPI publish
-        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v1.0.0
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.0.0
         with:
           wif_provider: ${{ vars.WIF_PROVIDER }}
           pypi_sa: ${{ vars.PYPI_SA }}

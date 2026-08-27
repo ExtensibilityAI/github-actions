@@ -1,0 +1,60 @@
+name: Detect path changes
+description: >
+  Determine whether files under a directory changed for the current event
+  (pull_request, push, or workflow_dispatch). Outputs changed=true|false.
+
+inputs:
+  path_prefix:
+    description: Directory prefix to match (e.g. sdk). Trailing slash optional.
+    required: true
+  force:
+    description: If true, always report changed=true
+    required: false
+    default: 'false'
+
+outputs:
+  changed:
+    description: true if path_prefix changed (or force is true)
+    value: ${{ steps.detect.outputs.changed }}
+
+runs:
+  using: composite
+  steps:
+    - id: detect
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        FORCE: ${{ inputs.force }}
+        PATH_PREFIX: ${{ inputs.path_prefix }}
+        BEFORE: ${{ github.event.before }}
+        SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+        if [ "${FORCE:-false}" = "true" ]; then
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        PREFIX="${PATH_PREFIX%/}"
+        EMPTY_TREE=$(git hash-object -t tree /dev/null)
+        if [ "$EVENT_NAME" = "pull_request" ]; then
+          DIFF_RANGE="${BASE_SHA}...HEAD"
+        elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            DIFF_RANGE="HEAD~1...HEAD"
+          else
+            DIFF_RANGE="${EMPTY_TREE}...HEAD"
+          fi
+        else
+          if [ "${BEFORE:-}" = "0000000000000000000000000000000000000000" ] || [ -z "${BEFORE:-}" ]; then
+            DIFF_RANGE="${EMPTY_TREE}...HEAD"
+          else
+            DIFF_RANGE="${BEFORE}...${SHA}"
+          fi
+        fi
+        changed=$(git diff --name-only "$DIFF_RANGE" 2>/dev/null || git diff --name-only "${EMPTY_TREE}" HEAD)
+        if echo "$changed" | grep -q "^${PREFIX}/"; then
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "changed=false" >> "$GITHUB_OUTPUT"
+        fi

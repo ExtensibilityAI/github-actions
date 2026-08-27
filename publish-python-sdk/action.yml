@@ -1,0 +1,96 @@
+name: Publish Python SDK
+description: >
+  Resolve package version (prod base or staging .dev0+sha), fail if prod version
+  already exists in Artifact Registry, then uv build and twine upload.
+
+inputs:
+  deploy_env:
+    description: staging or prod
+    required: true
+  working_directory:
+    description: SDK package directory
+    required: false
+    default: sdk
+  uv_index_prefix:
+    description: UV index prefix for PyPI auth
+    required: true
+  gcp_project_id:
+    required: true
+  gcp_region:
+    required: true
+  wif_provider:
+    required: true
+  pypi_sa:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+    - name: Set up Python
+      shell: bash
+      run: uv python install 3.11
+
+    - name: Authenticate to PyPI
+      uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.0.0
+      with:
+        wif_provider: ${{ inputs.wif_provider }}
+        pypi_sa: ${{ inputs.pypi_sa }}
+        uv_index_prefix: ${{ inputs.uv_index_prefix }}
+
+    - name: Resolve SDK version
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      env:
+        DEPLOY_ENV: ${{ inputs.deploy_env }}
+        SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+        BASE=$(grep -m1 '^version = ' pyproject.toml | sed 's/.*"\([^"]*\)".*/\1/')
+        PACKAGE=$(grep -m1 '^name = ' pyproject.toml | sed 's/.*"\([^"]*\)".*/\1/')
+        if [ "$DEPLOY_ENV" = "prod" ]; then
+          VERSION="$BASE"
+        else
+          VERSION="${BASE}.dev0+${SHA}"
+        fi
+        echo "PACKAGE=$PACKAGE" >> "$GITHUB_ENV"
+        echo "PACKAGE_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+    - name: Fail if prod version already published
+      if: inputs.deploy_env == 'prod'
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      env:
+        REGION: ${{ inputs.gcp_region }}
+        PROJECT_ID: ${{ inputs.gcp_project_id }}
+      run: |
+        set -euo pipefail
+        if gcloud artifacts versions describe "$PACKAGE_VERSION" \
+          --package="$PACKAGE" \
+          --repository=pypi \
+          --location="${REGION}" \
+          --project="${PROJECT_ID}" \
+          --quiet 2>/dev/null; then
+          echo "::error::Version $PACKAGE_VERSION of $PACKAGE is already in Artifact Registry. Bump version in pyproject.toml."
+          exit 1
+        fi
+
+    - name: Set SDK version
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: sed -i "s/^version = .*/version = \"$PACKAGE_VERSION\"/" pyproject.toml
+
+    - name: Build and publish
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      env:
+        REGION: ${{ inputs.gcp_region }}
+        PROJECT_ID: ${{ inputs.gcp_project_id }}
+      run: |
+        set -euo pipefail
+        uv sync --extra publish
+        uv build
+        uv run twine upload --repository-url \
+          "https://${REGION}-python.pkg.dev/${PROJECT_ID}/pypi/" \
+          dist/*

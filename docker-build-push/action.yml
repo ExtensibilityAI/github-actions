@@ -60,7 +60,7 @@ runs:
     # Must be fully-qualified: relative ./ paths resolve in the *caller* workspace, not this repo.
     - name: Setup PyPI auth
       if: inputs.needs_pypi_auth == 'true'
-      uses: ExtensibilityAI/github-actions/setup-pypi-auth@v1.0.2
+      uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.0.0
       with:
         wif_provider: ${{ inputs.wif_provider }}
         pypi_sa: ${{ inputs.pypi_sa }}
