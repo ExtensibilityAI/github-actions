@@ -172,4 +172,4 @@ jobs:
     secrets: inherit
 ```
 
-Nested composites inside this repo use relative paths (`./setup-pypi-auth`). Reusable workflows called from other repos reference composites as `ExtensibilityAI/github-actions/<name>@v1.0.1`.
+Composite actions that nest other composites (e.g. `docker-build-push` → `setup-pypi-auth`) **must** use fully-qualified `ExtensibilityAI/github-actions/<name>@vX.Y.Z` pins. Relative `./` paths resolve in the *caller* workspace and break when this library is consumed from another repo. Reusable workflows likewise pin composites as `ExtensibilityAI/github-actions/<name>@vX.Y.Z`.

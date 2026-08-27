@@ -258,7 +258,7 @@ jobs:
       image_changed: ${{ steps.build.outputs.image_changed }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: ExtensibilityAI/github-actions/docker-build-push@v1.0.0
+      - uses: ExtensibilityAI/github-actions/docker-build-push@v1.0.3
         id: build
         with:
           image_name: ${{ inputs.api_image }}
@@ -285,7 +285,7 @@ jobs:
       image_changed: ${{ steps.build.outputs.image_changed }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: ExtensibilityAI/github-actions/docker-build-push@v1.0.0
+      - uses: ExtensibilityAI/github-actions/docker-build-push@v1.0.3
         id: build
         with:
           image_name: ${{ inputs.frontend_image }}
@@ -312,7 +312,7 @@ jobs:
       image_changed: ${{ steps.build.outputs.image_changed }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: ExtensibilityAI/github-actions/docker-build-push@v1.0.0
+      - uses: ExtensibilityAI/github-actions/docker-build-push@v1.0.3
         id: build
         with:
           image_name: ${{ inputs.app_image }}
