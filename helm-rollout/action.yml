@@ -1,0 +1,69 @@
+name: Helm rollout
+description: >
+  helm upgrade --install --reuse-values setting image.repository and image.tag
+  to the commit SHA. Optional helm repo add before upgrade.
+
+inputs:
+  helm_chart:
+    required: true
+  helm_image_repository_suffix:
+    description: Image name under docker-images (repository suffix)
+    required: true
+  helm_release:
+    description: Release name (falls back to HELM_RELEASE env/var if empty)
+    required: false
+    default: ''
+  helm_repo_name:
+    required: false
+    default: ''
+  helm_repo_url:
+    required: false
+    default: ''
+  gcp_project_id:
+    required: true
+  gcp_region:
+    required: true
+  k8s_namespace:
+    required: true
+  helm_release_var:
+    description: Fallback release name when helm_release input is empty
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Helm
+      uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+
+    - name: Roll out via Helm
+      shell: bash
+      env:
+        NS: ${{ inputs.k8s_namespace }}
+        SHA: ${{ github.sha }}
+        RELEASE: ${{ inputs.helm_release }}
+        RELEASE_VAR: ${{ inputs.helm_release_var }}
+        CHART: ${{ inputs.helm_chart }}
+        IMAGE_SUFFIX: ${{ inputs.helm_image_repository_suffix }}
+        REPO_NAME: ${{ inputs.helm_repo_name }}
+        REPO_URL: ${{ inputs.helm_repo_url }}
+        REGION: ${{ inputs.gcp_region }}
+        PROJECT_ID: ${{ inputs.gcp_project_id }}
+      run: |
+        set -euo pipefail
+        if [ -n "${REPO_NAME:-}" ] && [ -n "${REPO_URL:-}" ]; then
+          helm repo add "$REPO_NAME" "$REPO_URL" || true
+          helm repo update "$REPO_NAME" || helm repo update || true
+        fi
+        REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/docker-images"
+        IMAGE_REPO="${REGISTRY}/${IMAGE_SUFFIX}"
+        SET_ARGS=(--set "image.repository=${IMAGE_REPO}" --set "image.tag=${SHA}")
+        RELEASE_NAME="${RELEASE:-${RELEASE_VAR}}"
+        if [ -z "$RELEASE_NAME" ]; then
+          echo "::error::helm_release input or HELM_RELEASE var required"
+          exit 1
+        fi
+        helm upgrade --install "$RELEASE_NAME" "$CHART" -n "$NS" \
+          --reuse-values \
+          "${SET_ARGS[@]}" \
+          --wait --timeout 5m

@@ -1,0 +1,82 @@
+name: Parse image matrix
+description: >
+  Validate and normalize a JSON array of container image specs for deploy-gke-app.
+  Applies defaults for context, dockerfile, deployment, container, needs_pypi_auth,
+  and build_secret_env. Optional role (api|frontend|app) fills deployment/container.
+
+inputs:
+  images:
+    description: JSON array of image objects (name required)
+    required: true
+
+outputs:
+  matrix:
+    description: JSON array suitable for strategy.matrix.include
+    value: ${{ steps.parse.outputs.matrix }}
+  count:
+    description: Number of images
+    value: ${{ steps.parse.outputs.count }}
+  first_name:
+    description: name of the first image (for helm suffix default)
+    value: ${{ steps.parse.outputs.first_name }}
+
+runs:
+  using: composite
+  steps:
+    - id: parse
+      shell: bash
+      env:
+        IMAGES_JSON: ${{ inputs.images }}
+      run: |
+        set -euo pipefail
+        python3 <<'PY'
+        import json, os, sys
+
+        raw = os.environ.get("IMAGES_JSON", "").strip()
+        if not raw:
+            print("::error::images input is empty", file=sys.stderr)
+            sys.exit(1)
+        try:
+            images = json.loads(raw)
+        except json.JSONDecodeError as e:
+            print(f"::error::images is not valid JSON: {e}", file=sys.stderr)
+            sys.exit(1)
+        if not isinstance(images, list) or not images:
+            print("::error::images must be a non-empty JSON array", file=sys.stderr)
+            sys.exit(1)
+
+        role_defaults = {
+            "api": ("api", "api"),
+            "frontend": ("frontend", "frontend"),
+            "app": ("app", "app"),
+        }
+        out = []
+        for i, item in enumerate(images):
+            if not isinstance(item, dict):
+                print(f"::error::images[{i}] must be an object", file=sys.stderr)
+                sys.exit(1)
+            name = item.get("name")
+            if not name or not isinstance(name, str):
+                print(f"::error::images[{i}].name is required", file=sys.stderr)
+                sys.exit(1)
+            role = item.get("role") or ""
+            dep, cont = role_defaults.get(role, (None, None))
+            entry = {
+                "name": name,
+                "context": item.get("context") or ".",
+                "dockerfile": item.get("dockerfile") or "Dockerfile",
+                "deployment": item.get("deployment") or dep or name,
+                "container": item.get("container") or cont or name,
+                "needs_pypi_auth": bool(item.get("needs_pypi_auth", False)),
+                "build_secret_env": item.get("build_secret_env") or "",
+            }
+            # matrix include needs stringy booleans for composite inputs sometimes
+            entry["needs_pypi_auth"] = "true" if entry["needs_pypi_auth"] else "false"
+            out.append(entry)
+
+        matrix = json.dumps(out, separators=(",", ":"))
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+            fh.write(f"matrix={matrix}\n")
+            fh.write(f"count={len(out)}\n")
+            fh.write(f"first_name={out[0]['name']}\n")
+        PY

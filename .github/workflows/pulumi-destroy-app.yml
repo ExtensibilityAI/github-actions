@@ -97,7 +97,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Resolve GitHub token
-        uses: ExtensibilityAI/github-actions/resolve-github-token@v1.0.0
+        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.0.0
         with:
           infra-github-token: ${{ secrets.INFRA_GITHUB_TOKEN }}
           app-id: ${{ secrets.INFRA_GITHUB_APP_ID }}
@@ -107,7 +107,7 @@ jobs:
 
       - name: Authenticate to GCP for PyPI
         if: inputs.cloud == 'gcp'
-        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v1.0.0
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.0.0
         with:
           wif_provider: ${{ vars.WIF_PROVIDER }}
           pypi_sa: ${{ vars.GCP_SA }}

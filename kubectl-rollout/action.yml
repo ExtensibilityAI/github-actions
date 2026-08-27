@@ -1,0 +1,60 @@
+name: Kubectl rollout
+description: >
+  Roll out changed images to GKE via kubectl set image + rollout status.
+  images_json is the normalized image list; changed_by_name maps name -> true|false.
+
+inputs:
+  images_json:
+    description: JSON array of image specs (name, deployment, container)
+    required: true
+  changed_by_name:
+    description: JSON object mapping image name to "true" or "false"
+    required: true
+  gcp_project_id:
+    required: true
+  gcp_region:
+    required: true
+  k8s_namespace:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Roll out changed images
+      shell: bash
+      env:
+        IMAGES_JSON: ${{ inputs.images_json }}
+        CHANGED_JSON: ${{ inputs.changed_by_name }}
+        PROJECT_ID: ${{ inputs.gcp_project_id }}
+        REGION: ${{ inputs.gcp_region }}
+        NS: ${{ inputs.k8s_namespace }}
+        SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+        REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/docker-images"
+        export REGISTRY
+        python3 <<'PY'
+        import json, os, subprocess
+
+        images = json.loads(os.environ["IMAGES_JSON"])
+        changed = json.loads(os.environ["CHANGED_JSON"])
+        registry = os.environ["REGISTRY"]
+        ns = os.environ["NS"]
+        sha = os.environ["SHA"]
+
+        for img in images:
+            name = img["name"]
+            if str(changed.get(name, "false")).lower() != "true":
+                print(f"Skipping {name} (unchanged)")
+                continue
+            deployment = img["deployment"]
+            container = img["container"]
+            ref = f"{registry}/{name}:{sha}"
+            print(f"Rolling out {deployment}/{container} -> {ref}")
+            subprocess.check_call(
+                ["kubectl", "set", "image", f"deployment/{deployment}", f"{container}={ref}", "-n", ns]
+            )
+            subprocess.check_call(
+                ["kubectl", "rollout", "status", f"deployment/{deployment}", "-n", ns, "--timeout=5m"]
+            )
+        PY

@@ -12,11 +12,6 @@ on:
         type: string
         required: false
         default: '3.11'
-      ruff_fail:
-        description: Fail the job when ruff finds issues
-        type: boolean
-        required: false
-        default: true
       needs_pypi_auth:
         type: boolean
         required: false
@@ -38,7 +33,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # Always a non-empty Environment name (empty string causes reusable-workflow startup_failure).
     environment: ${{ inputs.github_environment }}
     permissions:
       id-token: write
@@ -56,7 +50,7 @@ jobs:
 
       - name: Authenticate to PyPI
         if: inputs.needs_pypi_auth
-        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v1.0.0
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.0.0
         with:
           wif_provider: ${{ vars.WIF_PROVIDER }}
           pypi_sa: ${{ vars.PYPI_SA }}
@@ -66,12 +60,7 @@ jobs:
         run: uv sync --extra dev
 
       - name: Lint (ruff)
-        if: inputs.ruff_fail
         run: uv run ruff check .
-
-      - name: Lint (ruff, non-blocking)
-        if: ${{ !inputs.ruff_fail }}
-        run: uv run ruff check . || true
 
       - name: Test
         run: uv run pytest
