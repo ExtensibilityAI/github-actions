@@ -82,21 +82,28 @@ actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`).
 
 ## Caller examples
 
+**Required:** jobs that `uses:` a reusable workflow must declare any permissions nested jobs need (at least `id-token: write` and `contents: read` for WIF). Otherwise GitHub fails with `requesting 'id-token: write', but is only allowed 'id-token: none'`.
+
 ### Package CI + publish
 
 ```yaml
 jobs:
   ci:
-    uses: ExtensibilityAI/github-actions/.github/workflows/ci-python-package.yml@v1.0.0
+    permissions:
+      id-token: write
+      contents: read
+    uses: ExtensibilityAI/github-actions/.github/workflows/ci-python-package.yml@v1.0.1
     with:
       needs_pypi_auth: true
       uv_index_prefix: EXTENSIBILITY_AI
+      github_environment: staging
     secrets: inherit
 
   publish:
-    needs: ci
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
-    uses: ExtensibilityAI/github-actions/.github/workflows/publish-python-package.yml@v1.0.0
+    permissions:
+      id-token: write
+      contents: read
+    uses: ExtensibilityAI/github-actions/.github/workflows/publish-python-package.yml@v1.0.1
     with:
       uv_index_prefix: EXTENSIBILITY_AI
     secrets: inherit
@@ -118,7 +125,10 @@ on:
 
 jobs:
   deploy:
-    uses: ExtensibilityAI/github-actions/.github/workflows/deploy-gke-app.yml@v1.0.0
+    permissions:
+      id-token: write
+      contents: read
+    uses: ExtensibilityAI/github-actions/.github/workflows/deploy-gke-app.yml@v1.0.1
     with:
       api_image: lims-api
       api_dockerfile: backend/Dockerfile
@@ -149,7 +159,10 @@ on:
 
 jobs:
   deploy:
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy.yml@v1.0.0
+    permissions:
+      id-token: write
+      contents: read
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy.yml@v1.0.1
     with:
       cloud: gcp
       platform_stack_name: infrastructure-core-gcp
@@ -159,4 +172,4 @@ jobs:
     secrets: inherit
 ```
 
-Nested composites inside this repo use relative paths (`./setup-pypi-auth`). Reusable workflows called from other repos reference composites as `ExtensibilityAI/github-actions/<name>@v1.0.0`.
+Nested composites inside this repo use relative paths (`./setup-pypi-auth`). Reusable workflows called from other repos reference composites as `ExtensibilityAI/github-actions/<name>@v1.0.1`.
