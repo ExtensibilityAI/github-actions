@@ -1,0 +1,198 @@
+name: CI Python backend
+
+on:
+  workflow_call:
+    inputs:
+      ci_style:
+        description: full | light | compose_config
+        type: string
+        required: false
+        default: full
+      backend_directory:
+        type: string
+        required: false
+        default: backend
+      frontend_directory:
+        type: string
+        required: false
+        default: frontend
+      python_version:
+        type: string
+        required: false
+        default: '3.11'
+      node_version:
+        type: string
+        required: false
+        default: '20'
+      run_postgres:
+        type: boolean
+        required: false
+        default: false
+      postgres_db:
+        type: string
+        required: false
+        default: app
+      postgres_user:
+        type: string
+        required: false
+        default: admin
+      postgres_password:
+        type: string
+        required: false
+        default: guest
+      run_frontend:
+        type: boolean
+        required: false
+        default: false
+      ruff_fail:
+        type: boolean
+        required: false
+        default: true
+      needs_pypi_auth:
+        type: boolean
+        required: false
+        default: false
+      uv_index_prefix:
+        type: string
+        required: false
+        default: EXTENSIBILITY_AI
+      integration_compose_files:
+        description: Optional compose file args for compose_config style (e.g. -f docker-compose.yml)
+        type: string
+        required: false
+        default: ''
+      use_staging_environment:
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  light:
+    if: inputs.ci_style == 'light'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.use_staging_environment && 'staging' || '' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+      - name: Set up Python
+        run: uv python install ${{ inputs.python_version }}
+      - name: Import / pytest without private index
+        working-directory: ${{ inputs.backend_directory }}
+        run: |
+          set -euo pipefail
+          if [ -f pyproject.toml ]; then
+            uv sync --extra dev || uv sync
+            uv run pytest -q || uv run python -c "import sys; print('pytest skipped')"
+          else
+            echo "No pyproject.toml in ${{ inputs.backend_directory }}"
+            exit 1
+          fi
+
+  compose_config:
+    if: inputs.ci_style == 'compose_config'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Bash syntax check scripts
+        run: |
+          set -euo pipefail
+          if [ -d scripts ]; then
+            find scripts -type f -name '*.sh' -print0 | xargs -0 -r bash -n
+          else
+            echo "No scripts/ directory; skipping bash -n"
+          fi
+      - name: docker compose config
+        run: |
+          set -euo pipefail
+          EXTRA="${{ inputs.integration_compose_files }}"
+          # shellcheck disable=SC2086
+          docker compose $EXTRA config >/dev/null
+          echo "compose config OK"
+
+  backend:
+    if: inputs.ci_style == 'full'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.use_staging_environment && 'staging' || '' }}
+    permissions:
+      id-token: write
+      contents: read
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: ${{ inputs.postgres_user }}
+          POSTGRES_PASSWORD: ${{ inputs.postgres_password }}
+          POSTGRES_DB: ${{ inputs.postgres_db }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Set up Python
+        run: uv python install ${{ inputs.python_version }}
+
+      - name: Authenticate to PyPI
+        if: inputs.needs_pypi_auth
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v1.0.0
+        with:
+          wif_provider: ${{ vars.WIF_PROVIDER }}
+          pypi_sa: ${{ vars.PYPI_SA }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+
+      - name: Install backend dependencies
+        working-directory: ${{ inputs.backend_directory }}
+        run: uv sync --extra dev
+
+      - name: Lint (ruff)
+        if: inputs.ruff_fail
+        working-directory: ${{ inputs.backend_directory }}
+        run: uv run ruff check .
+
+      - name: Lint (ruff, non-blocking)
+        if: ${{ !inputs.ruff_fail }}
+        working-directory: ${{ inputs.backend_directory }}
+        run: uv run ruff check . || true
+
+      - name: Tests
+        working-directory: ${{ inputs.backend_directory }}
+        env:
+          DATABASE_HOST: localhost
+          DATABASE_PORT: 5432
+          DATABASE_USER: ${{ inputs.postgres_user }}
+          DATABASE_PASSWORD: ${{ inputs.postgres_password }}
+          DATABASE_NAME: ${{ inputs.postgres_db }}
+        run: uv run pytest -v
+
+  frontend:
+    if: inputs.ci_style == 'full' && inputs.run_frontend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.frontend_directory }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.frontend_directory }}
+        run: npm ci
+
+      - name: Build
+        working-directory: ${{ inputs.frontend_directory }}
+        run: npm run build

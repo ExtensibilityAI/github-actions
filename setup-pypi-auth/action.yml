@@ -1,0 +1,40 @@
+name: Setup PyPI auth
+description: >
+  Authenticate to GCP via WIF and export uv index credentials for Artifact Registry PyPI.
+  Sets UV_INDEX_<uv_index_prefix>_PYPI_USERNAME and UV_INDEX_<uv_index_prefix>_PYPI_PASSWORD.
+
+inputs:
+  wif_provider:
+    description: Workload Identity Federation provider resource name
+    required: true
+  pypi_sa:
+    description: Service account email for WIF (PyPI publisher or infra GCP_SA)
+    required: true
+  uv_index_prefix:
+    description: >
+      Prefix for UV_INDEX_* env vars (e.g. EXTENSIBILITY_AI produces
+      UV_INDEX_EXTENSIBILITY_AI_PYPI_USERNAME / _PASSWORD)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Authenticate to GCP (WIF)
+      uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+      with:
+        workload_identity_provider: ${{ inputs.wif_provider }}
+        service_account: ${{ inputs.pypi_sa }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+    - name: Export uv index credentials
+      shell: bash
+      env:
+        UV_INDEX_PREFIX: ${{ inputs.uv_index_prefix }}
+      run: |
+        set -euo pipefail
+        echo "UV_INDEX_${UV_INDEX_PREFIX}_PYPI_USERNAME=oauth2accesstoken" >> "$GITHUB_ENV"
+        PYPI_PASSWORD="$(gcloud auth print-access-token)"
+        echo "::add-mask::$PYPI_PASSWORD"
+        echo "UV_INDEX_${UV_INDEX_PREFIX}_PYPI_PASSWORD=$PYPI_PASSWORD" >> "$GITHUB_ENV"

@@ -1,0 +1,151 @@
+name: Docker build and push
+description: |
+  Authenticate via WIF, optionally set up PyPI auth, build with cache-from :latest,
+  push :sha and :latest when image content changed. Outputs image_changed and image_ref.
+
+inputs:
+  image_name:
+    description: Image name in Artifact Registry docker-images repo (e.g. lims-api)
+    required: true
+  context:
+    description: Docker build context path
+    required: false
+    default: .
+  dockerfile:
+    description: Path to Dockerfile relative to repo root
+    required: false
+    default: Dockerfile
+  gcp_project_id:
+    description: GCP project ID
+    required: true
+  gcp_region:
+    description: GCP region for Artifact Registry
+    required: true
+  wif_provider:
+    description: Workload Identity Federation provider
+    required: true
+  gcp_sa:
+    description: Service account for docker push / Artifact Registry
+    required: true
+  needs_pypi_auth:
+    description: Whether to authenticate to private PyPI before build
+    required: false
+    default: 'false'
+  pypi_sa:
+    description: Service account for PyPI (required when needs_pypi_auth is true)
+    required: false
+    default: ''
+  uv_index_prefix:
+    description: UV index prefix (e.g. EXTENSIBILITY_AI)
+    required: false
+    default: EXTENSIBILITY_AI
+  build_secret_env:
+    description: >
+      Env var name to pass as Docker BuildKit secret (e.g. UV_INDEX_EXTENSIBILITY_AI_PYPI_PASSWORD).
+      Empty skips --secret.
+    required: false
+    default: ''
+
+outputs:
+  image_changed:
+    description: true if image was pushed (content differs from :latest)
+    value: ${{ steps.push.outputs.image_changed }}
+  image_ref:
+    description: Full image reference with commit SHA tag
+    value: ${{ steps.push.outputs.image_ref }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup PyPI auth
+      if: inputs.needs_pypi_auth == 'true'
+      uses: ./setup-pypi-auth
+      with:
+        wif_provider: ${{ inputs.wif_provider }}
+        pypi_sa: ${{ inputs.pypi_sa }}
+        uv_index_prefix: ${{ inputs.uv_index_prefix }}
+
+    - name: Authenticate to GCP (WIF)
+      uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+      with:
+        workload_identity_provider: ${{ inputs.wif_provider }}
+        service_account: ${{ inputs.gcp_sa }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+    - name: Configure Docker for Artifact Registry
+      shell: bash
+      env:
+        REGION: ${{ inputs.gcp_region }}
+      run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+    - name: Pull previous image for cache
+      shell: bash
+      env:
+        REGION: ${{ inputs.gcp_region }}
+        PROJECT_ID: ${{ inputs.gcp_project_id }}
+        IMAGE_NAME: ${{ inputs.image_name }}
+      run: |
+        set -euo pipefail
+        REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/docker-images"
+        docker pull "${REGISTRY}/${IMAGE_NAME}:latest" 2>/dev/null || true
+
+    - name: Build image
+      id: build
+      shell: bash
+      env:
+        REGION: ${{ inputs.gcp_region }}
+        PROJECT_ID: ${{ inputs.gcp_project_id }}
+        IMAGE_NAME: ${{ inputs.image_name }}
+        CONTEXT: ${{ inputs.context }}
+        DOCKERFILE: ${{ inputs.dockerfile }}
+        BUILD_SECRET_ENV: ${{ inputs.build_secret_env }}
+      run: |
+        set -euo pipefail
+        REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/docker-images"
+        SECRET_ARGS=()
+        if [ -n "${BUILD_SECRET_ENV:-}" ]; then
+          SECRET_ARGS+=(--secret "id=uv_pypi_password,env=${BUILD_SECRET_ENV}")
+        fi
+        docker build -f "$DOCKERFILE" "$CONTEXT" \
+          "${SECRET_ARGS[@]}" \
+          --cache-from="${REGISTRY}/${IMAGE_NAME}:latest" \
+          -t "${REGISTRY}/${IMAGE_NAME}:build"
+        OUR_ID=$(docker image inspect --format='{{.Id}}' "${REGISTRY}/${IMAGE_NAME}:build")
+        if docker image inspect "${REGISTRY}/${IMAGE_NAME}:latest" &>/dev/null; then
+          PREV_ID=$(docker image inspect --format='{{.Id}}' "${REGISTRY}/${IMAGE_NAME}:latest")
+          if [ "$OUR_ID" = "$PREV_ID" ]; then
+            echo "unchanged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "unchanged=false" >> "$GITHUB_OUTPUT"
+          fi
+        else
+          echo "unchanged=false" >> "$GITHUB_OUTPUT"
+        fi
+        echo "registry=$REGISTRY" >> "$GITHUB_OUTPUT"
+
+    - name: Push image
+      id: push
+      shell: bash
+      env:
+        REGION: ${{ inputs.gcp_region }}
+        PROJECT_ID: ${{ inputs.gcp_project_id }}
+        IMAGE_NAME: ${{ inputs.image_name }}
+        UNCHANGED: ${{ steps.build.outputs.unchanged }}
+        SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+        REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/docker-images"
+        REF="${REGISTRY}/${IMAGE_NAME}:${SHA}"
+        echo "image_ref=$REF" >> "$GITHUB_OUTPUT"
+        if [ "$UNCHANGED" = "true" ]; then
+          echo "image_changed=false" >> "$GITHUB_OUTPUT"
+          echo "Image unchanged from registry :latest; skipping push."
+          exit 0
+        fi
+        docker tag "${REGISTRY}/${IMAGE_NAME}:build" "$REF"
+        docker tag "${REGISTRY}/${IMAGE_NAME}:build" "${REGISTRY}/${IMAGE_NAME}:latest"
+        docker push "$REF"
+        docker push "${REGISTRY}/${IMAGE_NAME}:latest"
+        echo "image_changed=true" >> "$GITHUB_OUTPUT"

@@ -1,0 +1,51 @@
+name: Setup CodeArtifact auth
+description: Authenticate to AWS via OIDC and export uv index credentials for CodeArtifact PyPI.
+
+inputs:
+  aws_role_arn:
+    description: IAM role ARN for GitHub Actions
+    required: true
+  aws_region:
+    description: AWS region
+    required: true
+  uv_index_prefix:
+    description: Prefix for UV_INDEX_* env vars (e.g. EXTENSIBILITY_AI)
+    required: true
+  codeartifact_domain:
+    description: CodeArtifact domain (falls back to CODEARTIFACT_DOMAIN env)
+    required: false
+    default: ''
+  codeartifact_repo:
+    description: CodeArtifact repository name
+    required: false
+    default: pypi
+
+runs:
+  using: composite
+  steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+      with:
+        role-to-assume: ${{ inputs.aws_role_arn }}
+        aws-region: ${{ inputs.aws_region }}
+
+    - name: Export uv index credentials
+      shell: bash
+      env:
+        AWS_REGION: ${{ inputs.aws_region }}
+        UV_INDEX_PREFIX: ${{ inputs.uv_index_prefix }}
+        INPUT_DOMAIN: ${{ inputs.codeartifact_domain }}
+        INPUT_REPO: ${{ inputs.codeartifact_repo }}
+      run: |
+        set -euo pipefail
+        DOMAIN="${INPUT_DOMAIN:-${CODEARTIFACT_DOMAIN:-}}"
+        REPO="${INPUT_REPO:-pypi}"
+        ACCOUNT="${AWS_ACCOUNT_ID:-$(aws sts get-caller-identity --query Account --output text)}"
+        if [ -z "$DOMAIN" ]; then
+          echo "::warning::CODEARTIFACT_DOMAIN not set; skipping CodeArtifact token export"
+          exit 0
+        fi
+        TOKEN="$(aws codeartifact get-authorization-token --domain "$DOMAIN" --domain-owner "$ACCOUNT" --query authorizationToken --output text)"
+        echo "UV_INDEX_${UV_INDEX_PREFIX}_PYPI_USERNAME=aws" >> "$GITHUB_ENV"
+        echo "::add-mask::$TOKEN"
+        echo "UV_INDEX_${UV_INDEX_PREFIX}_PYPI_PASSWORD=$TOKEN" >> "$GITHUB_ENV"

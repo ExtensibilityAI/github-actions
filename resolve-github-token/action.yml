@@ -1,0 +1,37 @@
+name: Resolve GitHub token
+description: |
+  Mint an installation access token via actions/create-github-app-token and export
+  it as GITHUB_TOKEN for pulumi-github. Token is masked before writing to GITHUB_ENV.
+inputs:
+  infra-github-token:
+    description: Unused in GitHub App mode (accepted for workflow compatibility)
+    required: false
+    default: ''
+  app-id:
+    description: Value of secrets.INFRA_GITHUB_APP_ID
+    required: true
+  private-key:
+    description: Value of secrets.INFRA_GITHUB_APP_PRIVATE_KEY
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Generate GitHub App token
+      id: app-token
+      uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+    - name: Export App token as GITHUB_TOKEN
+      shell: bash
+      env:
+        APP_TOKEN: ${{ steps.app-token.outputs.token }}
+      run: |
+        set -euo pipefail
+        if [ -z "$APP_TOKEN" ]; then
+          echo "::error::create-github-app-token returned an empty token"
+          exit 1
+        fi
+        echo "::add-mask::$APP_TOKEN"
+        echo "GITHUB_TOKEN=$APP_TOKEN" >> "$GITHUB_ENV"

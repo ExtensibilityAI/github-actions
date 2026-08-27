@@ -1,0 +1,130 @@
+name: Pulumi Destroy App
+
+on:
+  workflow_call:
+    inputs:
+      cloud:
+        description: gcp or aws
+        type: string
+        required: true
+      slug:
+        description: App slug (required)
+        type: string
+        required: true
+      environments:
+        description: staging, prod, or both
+        type: string
+        required: false
+        default: both
+      uv_index_prefix:
+        type: string
+        required: false
+        default: EXTENSIBILITY_AI
+      install_gke_auth_plugin:
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  detect-destroy:
+    runs-on: ubuntu-latest
+    outputs:
+      destroy_slug: ${{ steps.detect.outputs.destroy_slug }}
+      destroy_matrix: ${{ steps.detect.outputs.destroy_matrix }}
+    steps:
+      - name: Validate destroy inputs
+        id: detect
+        env:
+          INPUT_SLUG: ${{ inputs.slug }}
+          INPUT_ENVIRONMENTS: ${{ inputs.environments }}
+          CLOUD: ${{ inputs.cloud }}
+        run: |
+          set -euo pipefail
+          slug="${INPUT_SLUG:-}"
+          slug="${slug// /}"
+          if [ -z "$slug" ]; then
+            echo "::error::destroy requires slug"
+            exit 1
+          fi
+          if [ "$CLOUD" != "gcp" ] && [ "$CLOUD" != "aws" ]; then
+            echo "::error::cloud must be gcp or aws"
+            exit 1
+          fi
+          envs="${INPUT_ENVIRONMENTS:-both}"
+          entries=()
+          case "$envs" in
+            staging) stacks="staging" ;;
+            prod) stacks="prod" ;;
+            # GCP: prod first (owns cross-stack GAR IAM refs to staging SA)
+            both)
+              if [ "$CLOUD" = "gcp" ]; then
+                stacks="prod staging"
+              else
+                stacks="staging prod"
+              fi
+              ;;
+            *)
+              echo "::error::environments must be staging, prod, or both"
+              exit 1
+              ;;
+          esac
+          for s in $stacks; do
+            entries+=("{\"slug\":\"${slug}\",\"pulumi_env\":\"${s}\"}")
+          done
+          matrix=$(printf '%s\n' "${entries[@]}" | jq -s -c '.')
+          echo "destroy_slug=$slug" >> "$GITHUB_OUTPUT"
+          echo "destroy_matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  destroy-app-stacks:
+    needs: detect-destroy
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJson(needs.detect-destroy.outputs.destroy_matrix) }}
+    concurrency:
+      group: destroy-${{ matrix.slug }}-${{ matrix.pulumi_env }}
+      cancel-in-progress: false
+    environment: ${{ matrix.pulumi_env }}
+    env:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      INFRA_CLI_SKIP_GCLOUD_CREDENTIALS: ${{ inputs.cloud == 'gcp' && 'true' || '' }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Resolve GitHub token
+        uses: ExtensibilityAI/github-actions/resolve-github-token@v1.0.0
+        with:
+          infra-github-token: ${{ secrets.INFRA_GITHUB_TOKEN }}
+          app-id: ${{ secrets.INFRA_GITHUB_APP_ID }}
+          private-key: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Authenticate to GCP for PyPI
+        if: inputs.cloud == 'gcp'
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v1.0.0
+        with:
+          wif_provider: ${{ vars.WIF_PROVIDER }}
+          pypi_sa: ${{ vars.GCP_SA }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+
+      - name: Install GKE auth plugin
+        if: inputs.cloud == 'gcp' && inputs.install_gke_auth_plugin
+        run: gcloud components install gke-gcloud-auth-plugin --quiet
+
+      - name: Configure AWS credentials
+        if: inputs.cloud == 'aws'
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - run: uv sync
+
+      - name: Pulumi destroy (app stack)
+        run: uv run infra app-destroy "${{ matrix.slug }}" --stack "${{ matrix.pulumi_env }}"

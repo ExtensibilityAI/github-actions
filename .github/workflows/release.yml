@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver without leading v (e.g. 1.0.1) or with v (v1.0.1)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Normalize version and tag
+        id: ver
+        env:
+          RAW: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          V="${RAW#v}"
+          if ! [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version must be X.Y.Z (got: $RAW)"
+            exit 1
+          fi
+          MAJOR="${V%%.*}"
+          echo "tag=v${V}" >> "$GITHUB_OUTPUT"
+          echo "major=v${MAJOR}" >> "$GITHUB_OUTPUT"
+
+      - name: Create annotated tag and move major
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+          MAJOR: ${{ steps.ver.outputs.major }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+          # Moving major tag (force update)
+          git tag -f "$MAJOR" "$TAG"
+          git push origin "$MAJOR" --force

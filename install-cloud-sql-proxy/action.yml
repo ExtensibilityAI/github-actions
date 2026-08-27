@@ -1,0 +1,30 @@
+name: Install Cloud SQL Auth Proxy
+description: Download a pinned Cloud SQL Auth Proxy binary and verify its SHA256 checksum.
+inputs:
+  version:
+    description: Cloud SQL Auth Proxy version tag
+    required: false
+    default: v2.14.2
+  sha256:
+    description: Expected SHA256 of cloud-sql-proxy.linux.amd64 for the version
+    required: false
+    default: 2f819e6e47e9026fa467cf55ca88eb674c698f8a93aecf940a364b4432c933f5
+runs:
+  using: composite
+  steps:
+    - name: Download and verify Cloud SQL Auth Proxy
+      shell: bash
+      env:
+        PROXY_VERSION: ${{ inputs.version }}
+        EXPECTED_SHA256: ${{ inputs.sha256 }}
+      run: |
+        set -euo pipefail
+        URL="https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/${PROXY_VERSION}/cloud-sql-proxy.linux.amd64"
+        curl -fsSL -o cloud-sql-proxy "$URL"
+        ACTUAL="$(sha256sum cloud-sql-proxy | awk '{print $1}')"
+        if [ "$ACTUAL" != "$EXPECTED_SHA256" ]; then
+          echo "::error::Cloud SQL Auth Proxy checksum mismatch (got $ACTUAL, expected $EXPECTED_SHA256)"
+          exit 1
+        fi
+        chmod +x cloud-sql-proxy
+        sudo mv cloud-sql-proxy /usr/local/bin/

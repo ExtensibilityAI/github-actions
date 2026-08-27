@@ -1,0 +1,53 @@
+name: Set deploy environment
+description: |
+  Resolve deploy environment and stack from event context.
+  mode=app: PR→staging, push→prod, workflow_dispatch→dispatch_environment.
+  mode=package: tag→prod, workflow_dispatch→dispatch_environment, otherwise staging.
+
+inputs:
+  mode:
+    description: app or package
+    required: true
+  dispatch_environment:
+    description: Environment from workflow_dispatch (staging or prod)
+    required: false
+    default: ''
+
+outputs:
+  env:
+    description: Target environment (staging or prod)
+    value: ${{ steps.resolve.outputs.env }}
+  stack:
+    description: Pulumi/stack name (same as env for app/package)
+    value: ${{ steps.resolve.outputs.stack }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        DISPATCH_ENV: ${{ inputs.dispatch_environment }}
+        EVENT_NAME: ${{ github.event_name }}
+        REF_TYPE: ${{ github.ref_type }}
+      run: |
+        set -euo pipefail
+        if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          ENV="${DISPATCH_ENV:-staging}"
+        elif [ "$MODE" = "package" ]; then
+          if [ "$REF_TYPE" = "tag" ]; then
+            ENV=prod
+          else
+            ENV=staging
+          fi
+        else
+          # mode=app
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            ENV=staging
+          else
+            ENV=prod
+          fi
+        fi
+        echo "env=$ENV" >> "$GITHUB_OUTPUT"
+        echo "stack=$ENV" >> "$GITHUB_OUTPUT"

@@ -1,0 +1,115 @@
+name: Publish Python package
+
+on:
+  workflow_call:
+    inputs:
+      working_directory:
+        type: string
+        required: false
+        default: .
+      python_version:
+        type: string
+        required: false
+        default: '3.11'
+      uv_index_prefix:
+        type: string
+        required: false
+        default: EXTENSIBILITY_AI
+      pyproject_path:
+        description: Path to pyproject.toml relative to working_directory
+        type: string
+        required: false
+        default: pyproject.toml
+      dispatch_environment:
+        description: Forwarded workflow_dispatch environment (optional)
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  set-env:
+    runs-on: ubuntu-latest
+    outputs:
+      env: ${{ steps.env.outputs.env }}
+      stack: ${{ steps.env.outputs.stack }}
+    steps:
+      - uses: ExtensibilityAI/github-actions/set-deploy-env@v1.0.0
+        id: env
+        with:
+          mode: package
+          dispatch_environment: ${{ inputs.dispatch_environment || github.event.inputs.environment || '' }}
+
+  publish:
+    needs: set-env
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-env.outputs.env }}
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    env:
+      REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Set up Python
+        run: uv python install ${{ inputs.python_version }}
+
+      - name: Authenticate to GCP for PyPI publish
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v1.0.0
+        with:
+          wif_provider: ${{ vars.WIF_PROVIDER }}
+          pypi_sa: ${{ vars.PYPI_SA }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+
+      - name: Resolve package version
+        env:
+          DEPLOY_ENV: ${{ needs.set-env.outputs.env }}
+          PYPROJECT: ${{ inputs.pyproject_path }}
+        run: |
+          set -euo pipefail
+          BASE=$(grep -m1 '^version = ' "$PYPROJECT" | sed 's/.*"\([^"]*\)".*/\1/')
+          PACKAGE=$(grep -m1 '^name = ' "$PYPROJECT" | sed 's/.*"\([^"]*\)".*/\1/')
+          if [ "$DEPLOY_ENV" = "prod" ]; then
+            VERSION="$BASE"
+          else
+            VERSION="${BASE}.dev0+${{ github.sha }}"
+          fi
+          echo "PACKAGE=$PACKAGE" >> "$GITHUB_ENV"
+          echo "PACKAGE_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Fail if prod version already published
+        if: needs.set-env.outputs.env == 'prod'
+        run: |
+          set -euo pipefail
+          if gcloud artifacts versions describe "$PACKAGE_VERSION" \
+            --package="$PACKAGE" \
+            --repository=pypi \
+            --location="${{ env.REGION }}" \
+            --project="${{ vars.GCP_PROJECT_ID }}" \
+            --quiet 2>/dev/null; then
+            echo "::error::Version $PACKAGE_VERSION of $PACKAGE is already in Artifact Registry. Bump version in pyproject.toml."
+            exit 1
+          fi
+          echo "Version $PACKAGE_VERSION is not published yet; proceeding."
+
+      - name: Set package version
+        env:
+          PYPROJECT: ${{ inputs.pyproject_path }}
+        run: sed -i "s/^version = .*/version = \"$PACKAGE_VERSION\"/" "$PYPROJECT"
+
+      - name: Build package
+        run: |
+          uv sync --extra dev
+          uv build
+
+      - name: Publish to Artifact Registry PyPI
+        run: |
+          uv sync --extra publish
+          uv run twine upload --repository-url \
+            "https://${{ env.REGION }}-python.pkg.dev/${{ vars.GCP_PROJECT_ID }}/pypi/" \
+            dist/*

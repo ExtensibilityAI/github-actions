@@ -1,0 +1,543 @@
+name: Deploy GKE app
+
+on:
+  workflow_call:
+    inputs:
+      api_image:
+        description: API image name (empty to skip)
+        type: string
+        required: false
+        default: ''
+      api_context:
+        type: string
+        required: false
+        default: .
+      api_dockerfile:
+        type: string
+        required: false
+        default: backend/Dockerfile
+      api_deployment:
+        type: string
+        required: false
+        default: api
+      api_container:
+        type: string
+        required: false
+        default: api
+      api_needs_pypi_auth:
+        type: boolean
+        required: false
+        default: false
+      api_build_secret_env:
+        type: string
+        required: false
+        default: ''
+
+      frontend_image:
+        description: Frontend image name (empty to skip)
+        type: string
+        required: false
+        default: ''
+      frontend_context:
+        type: string
+        required: false
+        default: frontend
+      frontend_dockerfile:
+        type: string
+        required: false
+        default: frontend/Dockerfile
+      frontend_deployment:
+        type: string
+        required: false
+        default: frontend
+      frontend_container:
+        type: string
+        required: false
+        default: frontend
+      frontend_needs_pypi_auth:
+        type: boolean
+        required: false
+        default: false
+      frontend_build_secret_env:
+        type: string
+        required: false
+        default: ''
+
+      app_image:
+        description: Single-image app name (empty to skip; e.g. dash)
+        type: string
+        required: false
+        default: ''
+      app_context:
+        type: string
+        required: false
+        default: .
+      app_dockerfile:
+        type: string
+        required: false
+        default: Dockerfile
+      app_deployment:
+        type: string
+        required: false
+        default: app
+      app_container:
+        type: string
+        required: false
+        default: app
+      app_needs_pypi_auth:
+        type: boolean
+        required: false
+        default: false
+      app_build_secret_env:
+        type: string
+        required: false
+        default: ''
+
+      uv_index_prefix:
+        type: string
+        required: false
+        default: EXTENSIBILITY_AI
+
+      deploy_method:
+        description: kubectl or helm
+        type: string
+        required: false
+        default: kubectl
+      helm_release:
+        type: string
+        required: false
+        default: ''
+      helm_chart:
+        type: string
+        required: false
+        default: ''
+      helm_image_repository_suffix:
+        description: Image name for helm --set image.repository suffix
+        type: string
+        required: false
+        default: ''
+      helm_extra_set:
+        type: string
+        required: false
+        default: ''
+
+      run_migrations:
+        type: boolean
+        required: false
+        default: false
+      migration_workdir:
+        type: string
+        required: false
+        default: backend
+      db_secret_name_prefix:
+        description: Secret name prefix (suffix -${env} appended)
+        type: string
+        required: false
+        default: ''
+      db_user:
+        type: string
+        required: false
+        default: ''
+      db_name:
+        type: string
+        required: false
+        default: ''
+      instance_name_prefix:
+        description: Cloud SQL instance prefix (suffix -${env} appended)
+        type: string
+        required: false
+        default: platform-db
+      needs_pypi_auth_migrations:
+        type: boolean
+        required: false
+        default: true
+
+      publish_sdk:
+        type: boolean
+        required: false
+        default: false
+      sdk_directory:
+        type: string
+        required: false
+        default: sdk
+      force_publish_sdk:
+        type: boolean
+        required: false
+        default: false
+
+      dispatch_environment:
+        type: string
+        required: false
+        default: ''
+      env_mode:
+        type: string
+        required: false
+        default: app
+
+jobs:
+  set-env:
+    runs-on: ubuntu-latest
+    outputs:
+      env: ${{ steps.env.outputs.env }}
+      stack: ${{ steps.env.outputs.stack }}
+      sdk_changed: ${{ steps.detect-sdk.outputs.sdk_changed || steps.detect-sdk-skip.outputs.sdk_changed || 'false' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect SDK changes
+        id: detect-sdk
+        if: inputs.publish_sdk
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          FORCE_PUBLISH: ${{ inputs.force_publish_sdk }}
+          SDK_DIR: ${{ inputs.sdk_directory }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "${FORCE_PUBLISH:-false}" = "true" ]; then
+            echo "sdk_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          EMPTY_TREE=$(git hash-object -t tree /dev/null)
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            DIFF_RANGE="${BASE_SHA}...HEAD"
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+              DIFF_RANGE="HEAD~1...HEAD"
+            else
+              DIFF_RANGE="${EMPTY_TREE}...HEAD"
+            fi
+          else
+            if [ "${BEFORE:-}" = "0000000000000000000000000000000000000000" ] || [ -z "${BEFORE:-}" ]; then
+              DIFF_RANGE="${EMPTY_TREE}...HEAD"
+            else
+              DIFF_RANGE="${BEFORE}...${SHA}"
+            fi
+          fi
+          changed=$(git diff --name-only "$DIFF_RANGE" 2>/dev/null || git diff --name-only "${EMPTY_TREE}" HEAD)
+          if echo "$changed" | grep -q "^${SDK_DIR}/"; then
+            echo "sdk_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sdk_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Default sdk_changed when publish_sdk is false
+        if: ${{ !inputs.publish_sdk }}
+        id: detect-sdk-skip
+        run: echo "sdk_changed=false" >> "$GITHUB_OUTPUT"
+
+      - uses: ExtensibilityAI/github-actions/set-deploy-env@v1.0.0
+        id: env
+        with:
+          mode: ${{ inputs.env_mode }}
+          dispatch_environment: ${{ inputs.dispatch_environment || github.event.inputs.environment || '' }}
+
+  build-api:
+    needs: set-env
+    if: inputs.api_image != ''
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-env.outputs.env }}
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      image_changed: ${{ steps.build.outputs.image_changed }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ExtensibilityAI/github-actions/docker-build-push@v1.0.0
+        id: build
+        with:
+          image_name: ${{ inputs.api_image }}
+          context: ${{ inputs.api_context }}
+          dockerfile: ${{ inputs.api_dockerfile }}
+          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
+          gcp_region: ${{ vars.GCP_REGION || 'us-central1' }}
+          wif_provider: ${{ vars.WIF_PROVIDER }}
+          gcp_sa: ${{ vars.GCP_SA }}
+          needs_pypi_auth: ${{ inputs.api_needs_pypi_auth }}
+          pypi_sa: ${{ vars.PYPI_SA }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+          build_secret_env: ${{ inputs.api_build_secret_env }}
+
+  build-frontend:
+    needs: set-env
+    if: inputs.frontend_image != ''
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-env.outputs.env }}
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      image_changed: ${{ steps.build.outputs.image_changed }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ExtensibilityAI/github-actions/docker-build-push@v1.0.0
+        id: build
+        with:
+          image_name: ${{ inputs.frontend_image }}
+          context: ${{ inputs.frontend_context }}
+          dockerfile: ${{ inputs.frontend_dockerfile }}
+          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
+          gcp_region: ${{ vars.GCP_REGION || 'us-central1' }}
+          wif_provider: ${{ vars.WIF_PROVIDER }}
+          gcp_sa: ${{ vars.GCP_SA }}
+          needs_pypi_auth: ${{ inputs.frontend_needs_pypi_auth }}
+          pypi_sa: ${{ vars.PYPI_SA }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+          build_secret_env: ${{ inputs.frontend_build_secret_env }}
+
+  build-app:
+    needs: set-env
+    if: inputs.app_image != ''
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-env.outputs.env }}
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      image_changed: ${{ steps.build.outputs.image_changed }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ExtensibilityAI/github-actions/docker-build-push@v1.0.0
+        id: build
+        with:
+          image_name: ${{ inputs.app_image }}
+          context: ${{ inputs.app_context }}
+          dockerfile: ${{ inputs.app_dockerfile }}
+          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
+          gcp_region: ${{ vars.GCP_REGION || 'us-central1' }}
+          wif_provider: ${{ vars.WIF_PROVIDER }}
+          gcp_sa: ${{ vars.GCP_SA }}
+          needs_pypi_auth: ${{ inputs.app_needs_pypi_auth }}
+          pypi_sa: ${{ vars.PYPI_SA }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+          build_secret_env: ${{ inputs.app_build_secret_env }}
+
+  sdk-publish:
+    needs: set-env
+    if: inputs.publish_sdk && needs.set-env.outputs.sdk_changed == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-env.outputs.env }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.sdk_directory }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Authenticate to PyPI
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v1.0.0
+        with:
+          wif_provider: ${{ vars.WIF_PROVIDER }}
+          pypi_sa: ${{ vars.PYPI_SA }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+      - name: Resolve SDK version
+        env:
+          DEPLOY_ENV: ${{ needs.set-env.outputs.env }}
+        run: |
+          set -euo pipefail
+          BASE=$(grep -m1 '^version = ' pyproject.toml | sed 's/.*"\([^"]*\)".*/\1/')
+          PACKAGE=$(grep -m1 '^name = ' pyproject.toml | sed 's/.*"\([^"]*\)".*/\1/')
+          if [ "$DEPLOY_ENV" = "prod" ]; then
+            VERSION="$BASE"
+          else
+            VERSION="${BASE}.dev0+${{ github.sha }}"
+          fi
+          echo "PACKAGE=$PACKAGE" >> "$GITHUB_ENV"
+          echo "PACKAGE_VERSION=$VERSION" >> "$GITHUB_ENV"
+      - name: Fail if prod version already published
+        if: needs.set-env.outputs.env == 'prod'
+        run: |
+          set -euo pipefail
+          if gcloud artifacts versions describe "$PACKAGE_VERSION" \
+            --package="$PACKAGE" \
+            --repository=pypi \
+            --location="${{ env.REGION }}" \
+            --project="${{ vars.GCP_PROJECT_ID }}" \
+            --quiet 2>/dev/null; then
+            echo "::error::Version $PACKAGE_VERSION of $PACKAGE is already in Artifact Registry. Bump version in pyproject.toml."
+            exit 1
+          fi
+      - name: Set SDK version
+        run: sed -i "s/^version = .*/version = \"$PACKAGE_VERSION\"/" pyproject.toml
+      - name: Build and publish
+        run: |
+          uv sync --extra publish
+          uv build
+          uv run twine upload --repository-url \
+            "https://${{ env.REGION }}-python.pkg.dev/${{ vars.GCP_PROJECT_ID }}/pypi/" \
+            dist/*
+
+  migrations:
+    needs: [set-env, build-api, build-frontend, build-app]
+    if: |
+      always() &&
+      inputs.run_migrations &&
+      (needs.build-api.result == 'success' || needs.build-api.result == 'skipped') &&
+      (needs.build-frontend.result == 'success' || needs.build-frontend.result == 'skipped') &&
+      (needs.build-app.result == 'success' || needs.build-app.result == 'skipped') &&
+      (
+        needs.build-api.outputs.image_changed == 'true' ||
+        needs.build-frontend.outputs.image_changed == 'true' ||
+        needs.build-app.outputs.image_changed == 'true'
+      )
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-env.outputs.env }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+      ENV: ${{ needs.set-env.outputs.env }}
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      INSTANCE_NAME: ${{ inputs.instance_name_prefix }}-${{ needs.set-env.outputs.env }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Authenticate to PyPI
+        if: inputs.needs_pypi_auth_migrations
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v1.0.0
+        with:
+          wif_provider: ${{ vars.WIF_PROVIDER }}
+          pypi_sa: ${{ vars.PYPI_SA }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+
+      - name: Authenticate to GCP (WIF)
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Get DB password from Secret Manager
+        id: db-secret
+        run: |
+          set -euo pipefail
+          SECRET="${{ inputs.db_secret_name_prefix }}-${{ env.ENV }}"
+          PASSWORD=$(gcloud secrets versions access latest --secret="$SECRET" --project="${{ env.PROJECT_ID }}")
+          echo "::add-mask::$PASSWORD"
+          echo "password=$PASSWORD" >> "$GITHUB_OUTPUT"
+
+      - uses: ExtensibilityAI/github-actions/install-cloud-sql-proxy@v1.0.0
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Run migrations
+        env:
+          CONFIG_ENV: ${{ needs.set-env.outputs.env }}
+          DATABASE_HOST: 127.0.0.1
+          DATABASE_USER: ${{ inputs.db_user }}
+          DATABASE_PASSWORD: ${{ steps.db-secret.outputs.password }}
+          DATABASE_NAME: ${{ inputs.db_name }}
+          DATABASE_PORT: 5432
+        run: |
+          set -euo pipefail
+          CONNECTION_NAME="${{ env.PROJECT_ID }}:${{ env.REGION }}:${{ env.INSTANCE_NAME }}"
+          cloud-sql-proxy --port=5432 "$CONNECTION_NAME" &
+          sleep 3
+          cd "${{ inputs.migration_workdir }}" && uv sync && uv run alembic upgrade head
+          kill %1 2>/dev/null || true
+
+  deploy:
+    needs: [set-env, migrations, build-api, build-frontend, build-app]
+    if: |
+      always() &&
+      (needs.migrations.result == 'success' || needs.migrations.result == 'skipped') &&
+      (needs.build-api.result == 'success' || needs.build-api.result == 'skipped') &&
+      (needs.build-frontend.result == 'success' || needs.build-frontend.result == 'skipped') &&
+      (needs.build-app.result == 'success' || needs.build-app.result == 'skipped') &&
+      (
+        needs.build-api.outputs.image_changed == 'true' ||
+        needs.build-frontend.outputs.image_changed == 'true' ||
+        needs.build-app.outputs.image_changed == 'true'
+      )
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-env.outputs.env }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Authenticate to GCP (WIF)
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SA }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@64bc7249bbcf78056bb92f14d3cedc2da193946c # v2
+        with:
+          cluster_name: ${{ vars.GKE_CLUSTER }}
+          location: ${{ vars.GKE_REGION }}
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Roll out via kubectl
+        if: inputs.deploy_method == 'kubectl'
+        env:
+          NS: ${{ vars.K8S_NAMESPACE }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          REGISTRY="${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/docker-images"
+          if [ -n "${{ inputs.api_image }}" ] && [ "${{ needs.build-api.outputs.image_changed }}" = "true" ]; then
+            kubectl set image "deployment/${{ inputs.api_deployment }}" \
+              "${{ inputs.api_container }}=${REGISTRY}/${{ inputs.api_image }}:${SHA}" -n "$NS"
+            kubectl rollout status "deployment/${{ inputs.api_deployment }}" -n "$NS" --timeout=5m
+          fi
+          if [ -n "${{ inputs.frontend_image }}" ] && [ "${{ needs.build-frontend.outputs.image_changed }}" = "true" ]; then
+            kubectl set image "deployment/${{ inputs.frontend_deployment }}" \
+              "${{ inputs.frontend_container }}=${REGISTRY}/${{ inputs.frontend_image }}:${SHA}" -n "$NS"
+            kubectl rollout status "deployment/${{ inputs.frontend_deployment }}" -n "$NS" --timeout=5m
+          fi
+          if [ -n "${{ inputs.app_image }}" ] && [ "${{ needs.build-app.outputs.image_changed }}" = "true" ]; then
+            kubectl set image "deployment/${{ inputs.app_deployment }}" \
+              "${{ inputs.app_container }}=${REGISTRY}/${{ inputs.app_image }}:${SHA}" -n "$NS"
+            kubectl rollout status "deployment/${{ inputs.app_deployment }}" -n "$NS" --timeout=5m
+          fi
+
+      - name: Setup Helm
+        if: inputs.deploy_method == 'helm'
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+
+      - name: Roll out via Helm
+        if: inputs.deploy_method == 'helm'
+        env:
+          NS: ${{ vars.K8S_NAMESPACE }}
+          SHA: ${{ github.sha }}
+          RELEASE: ${{ inputs.helm_release }}
+          CHART: ${{ inputs.helm_chart }}
+          IMAGE_SUFFIX: ${{ inputs.helm_image_repository_suffix }}
+          EXTRA_SET: ${{ inputs.helm_extra_set }}
+        run: |
+          set -euo pipefail
+          REGISTRY="${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/docker-images"
+          IMAGE_REPO="${REGISTRY}/${IMAGE_SUFFIX}"
+          SET_ARGS=(--set "image.repository=${IMAGE_REPO}" --set "image.tag=${SHA}")
+          if [ -n "${EXTRA_SET:-}" ]; then
+            # EXTRA_SET is a space-separated list of --set args from the caller
+            # shellcheck disable=SC2206
+            EXTRA=( $EXTRA_SET )
+            SET_ARGS+=("${EXTRA[@]}")
+          fi
+          helm upgrade --install "$RELEASE" "$CHART" -n "$NS" "${SET_ARGS[@]}" --wait --timeout 5m

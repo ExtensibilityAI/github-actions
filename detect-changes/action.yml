@@ -1,0 +1,70 @@
+name: Detect changed stacks
+description: |
+  Detect which Pulumi stacks changed for deploy workflows via the infra CLI.
+  Prerequisites: actions/checkout, astral-sh/setup-uv, and uv sync at the repo root.
+inputs:
+  event-name:
+    description: GitHub event name (push, pull_request, workflow_dispatch)
+    required: true
+  diff-range:
+    description: Git diff range (e.g. base...HEAD)
+    required: true
+  input-env:
+    description: Environment for workflow_dispatch (staging or prod)
+    required: false
+    default: ''
+  input-slug:
+    description: Comma-separated app slugs for workflow_dispatch override
+    required: false
+    default: ''
+  input-target:
+    description: What to run on workflow_dispatch (app, platform, or both)
+    required: false
+    default: both
+outputs:
+  pulumi_env:
+    description: Target Pulumi environment (staging or prod)
+    value: ${{ steps.detect.outputs.pulumi_env }}
+  app_slugs:
+    description: JSON array of changed app slugs
+    value: ${{ steps.detect.outputs.app_slugs }}
+  app_stack_matrix:
+    description: JSON matrix of slug/workdir entries
+    value: ${{ steps.detect.outputs.app_stack_matrix }}
+  run_platform:
+    description: Whether to run the platform stack
+    value: ${{ steps.detect.outputs.run_platform }}
+  run_app_stacks:
+    description: Whether to run app stacks
+    value: ${{ steps.detect.outputs.run_app_stacks }}
+  app_must_finish_first:
+    description: Whether app stacks must finish before platform (AWS-style)
+    value: ${{ steps.detect.outputs.app_must_finish_first }}
+runs:
+  using: composite
+  steps:
+    - id: detect
+      shell: bash
+      env:
+        EVENT_NAME: ${{ inputs.event-name }}
+        DIFF_RANGE: ${{ inputs.diff-range }}
+        INPUT_ENV: ${{ inputs.input-env }}
+        INPUT_SLUG: ${{ inputs.input-slug }}
+        INPUT_TARGET: ${{ inputs.input-target }}
+      run: |
+        set -euo pipefail
+        args=(
+          --event-name "$EVENT_NAME"
+          --diff-range "$DIFF_RANGE"
+          --github-output "$GITHUB_OUTPUT"
+        )
+        if [ -n "${INPUT_ENV:-}" ]; then
+          args+=(--input-env "$INPUT_ENV")
+        fi
+        if [ -n "${INPUT_SLUG:-}" ]; then
+          args+=(--input-slug "$INPUT_SLUG")
+        fi
+        if [ -n "${INPUT_TARGET:-}" ]; then
+          args+=(--input-target "$INPUT_TARGET")
+        fi
+        uv run infra utils detect-changes "${args[@]}"

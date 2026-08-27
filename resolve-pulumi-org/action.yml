@@ -1,0 +1,35 @@
+name: Resolve Pulumi org
+description: |
+  Read pulumi:org from Pulumi stack YAML via the infra CLI.
+  Prerequisites: actions/checkout, astral-sh/setup-uv, and uv sync at the repo root.
+inputs:
+  pulumi-dir:
+    description: Path to Pulumi program directory (relative to repo root)
+    required: true
+  stack:
+    description: Stack suffix (staging or prod)
+    required: true
+  fallback-pulumi-dir:
+    description: Optional fallback directory (e.g. pulumi/platform for app stacks)
+    required: false
+    default: ''
+outputs:
+  pulumi-org:
+    description: Resolved Pulumi Cloud org/username
+    value: ${{ steps.resolve.outputs.pulumi_org }}
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! uv run infra --help &>/dev/null; then
+          echo "::error::infra CLI unavailable — run 'uv sync' at the repo root before this action"
+          exit 1
+        fi
+        args=(--pulumi-dir "${{ inputs.pulumi-dir }}" --stack "${{ inputs.stack }}")
+        if [ -n "${{ inputs.fallback-pulumi-dir }}" ]; then
+          args+=(--fallback-pulumi-dir "${{ inputs.fallback-pulumi-dir }}")
+        fi
+        echo "pulumi_org=$(uv run infra utils resolve-pulumi-org "${args[@]}")" >> "$GITHUB_OUTPUT"
