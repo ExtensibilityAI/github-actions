@@ -33,7 +33,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.use_staging_environment && 'staging' || '' }}
+    environment: staging
     permissions:
       id-token: write
       contents: read
