@@ -37,5 +37,7 @@ jobs:
       - name: Run actionlint
         run: |
           set -euo pipefail
-          mapfile -t files < <(find . -type f \( -name '*.yml' -o -name '*.yaml' \) ! -path './.git/*')
+          # Only lint GitHub Actions workflows. Composite action.yml files are not
+          # workflows; passing them makes actionlint treat them as invalid workflows.
+          mapfile -t files < <(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \))
           actionlint "${files[@]}"
