@@ -176,6 +176,8 @@ jobs:
           DATABASE_USER: ${{ inputs.postgres_user }}
           DATABASE_PASSWORD: ${{ inputs.postgres_password }}
           DATABASE_NAME: ${{ inputs.postgres_db }}
+          # Common for FastAPI/LIMS-style apps; ignored when unused.
+          AUTH_DEV_HEADERS_ENABLED: "true"
         run: uv run pytest -v
 
   frontend:

@@ -567,4 +567,8 @@ jobs:
             echo "::error::helm_release input or HELM_RELEASE var required"
             exit 1
           fi
-          helm upgrade --install "$RELEASE_NAME" "$CHART" -n "$NS" "${SET_ARGS[@]}" --wait --timeout 5m
+          # --reuse-values keeps infra-owned chart values; only image.* (and EXTRA_SET) change.
+          helm upgrade --install "$RELEASE_NAME" "$CHART" -n "$NS" \
+            --reuse-values \
+            "${SET_ARGS[@]}" \
+            --wait --timeout 5m
