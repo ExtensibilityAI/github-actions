@@ -60,13 +60,6 @@ on:
         type: string
         required: false
         default: platform-db
-      migration_extra_env:
-        description: >
-          Opaque newline-delimited KEY=VALUE (expanded in the caller). Never put
-          product-specific names in this reusable workflow itself.
-        type: string
-        required: false
-        default: ''
 
       publish_sdk:
         type: boolean
@@ -85,6 +78,13 @@ on:
         type: string
         required: false
         default: ''
+
+    secrets:
+      migration_extra_env:
+        description: >
+          Opaque newline-delimited KEY=VALUE (expanded in the caller). Must be a
+          workflow_call secret — GitHub forbids secrets.* in reusable with: inputs.
+        required: false
 
 jobs:
   set-env:
@@ -254,7 +254,7 @@ jobs:
           db_user: ${{ inputs.db_user }}
           db_name: ${{ inputs.db_name }}
           instance_name_prefix: ${{ inputs.instance_name_prefix }}
-          extra_env: ${{ inputs.migration_extra_env }}
+          extra_env: ${{ secrets.migration_extra_env }}
 
   deploy:
     needs: [set-env, migrations, build-summary]

@@ -14,7 +14,7 @@ Centralize CI/CD patterns (GCP GKE/Helm deploy, package publish, Pulumi) so prod
 | Pinning | Callers **must** pin with a release tag (`@v2.x.y`) or commit SHA — never `@main` / `@trunk`. |
 | Identity | GCP Workload Identity Federation must require `attribute.repository` (and prefer repo allowlists). |
 | Secrets | No long-lived cloud keys in GitHub secrets for GCP; use WIF. Pulumi / GitHub App secrets stay in caller environments. |
-| App-agnostic | Reusable workflows/actions must **never** reference product-specific `vars.*` / `secrets.*` names (e.g. `SCAFFOLDER_*`). Callers may pass opaque `KEY=VALUE` blobs (e.g. `migration_extra_env`) with values expanded in the caller. |
+| App-agnostic | Reusable workflows/actions must **never** reference product-specific `vars.*` / `secrets.*` names (e.g. `SCAFFOLDER_*`). Callers may pass opaque `KEY=VALUE` blobs via the `migration_extra_env` **secret** (not a `with:` input — GitHub forbids `secrets.*` in reusable workflow inputs). |
 | Third-party actions | Pin third-party actions to full commit SHAs with a `# vN` comment. |
 
 ## Supported surface
@@ -143,13 +143,18 @@ jobs:
     secrets: inherit
 ```
 
-Product-specific migrate env (scaffolder only) belongs in the **caller**:
+Product-specific migrate env (scaffolder only) belongs in the **caller** as a
+`secrets:` mapping (cannot use `secrets: inherit` in the same job when passing an
+explicit secret). Vars may be interpolated into the secret value:
 
 ```yaml
+    secrets:
       migration_extra_env: |
         SCAFFOLDER_GITHUB_ORG=${{ vars.SCAFFOLDER_GITHUB_ORG }}
         SCAFFOLDER_GITHUB_APP_PRIVATE_KEY_PEM=${{ secrets.SCAFFOLDER_GITHUB_APP_PRIVATE_KEY_PEM }}
 ```
+
+Callers that do not need extra migrate env keep `secrets: inherit`.
 
 ### Pulumi (GCP)
 
