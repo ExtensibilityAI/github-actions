@@ -25,15 +25,21 @@ on:
         type: string
         required: false
         default: EXTENSIBILITY_AI
-      use_staging_environment:
-        type: boolean
+      github_environment:
+        description: >
+          GitHub Environment used only to resolve vars/secrets for CI (e.g. WIF for
+          private PyPI). This is not a deploy target — prefer staging so CI never
+          needs prod credentials. Deploy/publish workflows select staging vs prod
+          separately via set-deploy-env.
+        type: string
         required: false
-        default: true
+        default: staging
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    environment: staging
+    # Always a non-empty Environment name (empty string causes reusable-workflow startup_failure).
+    environment: ${{ inputs.github_environment }}
     permissions:
       id-token: write
       contents: read
