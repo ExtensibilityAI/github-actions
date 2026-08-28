@@ -79,6 +79,14 @@ actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`).
 | `kubectl-rollout` | SHA-based kubectl set image for changed images |
 | `helm-rollout` | SHA-based helm upgrade --reuse-values |
 
+### Pulumi GitHub token
+
+`resolve-github-token` mints a GitHub App installation token and exports it as **`GITHUB_ACCESS_TOKEN`** and **`GH_TOKEN`**, plus step **`outputs.token`**.
+
+- **Never** write reserved **`GITHUB_TOKEN`** to `$GITHUB_ENV`. GitHub ignores that overwrite in reusable workflows, so later steps keep the default Actions token (scoped to the caller repo) and 401 on other-repo environment APIs.
+- Pulumi / `infra app-destroy` steps overlay `GITHUB_ACCESS_TOKEN` and `GH_TOKEN` from `steps.github-token.outputs.token`.
+- Python preflight then **overwrites** process `GITHUB_TOKEN` / `GH_TOKEN` from `GITHUB_ACCESS_TOKEN`. Destroy uses `run_program=True` so providers re-read the live App token (~1h) instead of the value stored in Pulumi state.
+
 **CI vs deploy environments:** Package/app **CI** workflows use a GitHub Environment (default `staging`) only to load WIF vars for private PyPI during tests — they do not deploy. **Deploy/publish** workflows call `set-deploy-env` so pushes to `main` and tags use `prod`, while pull requests use `staging`.
 
 ## Reusable workflows
@@ -224,7 +232,7 @@ jobs:
     secrets: inherit
 ```
 
-**Required caller secrets:** `PULUMI_ACCESS_TOKEN`, `INFRA_GITHUB_TOKEN`, `INFRA_GITHUB_APP_ID`, `INFRA_GITHUB_APP_PRIVATE_KEY`
+**Required caller secrets:** `PULUMI_ACCESS_TOKEN`, `INFRA_GITHUB_APP_ID`, `INFRA_GITHUB_APP_PRIVATE_KEY`. Optional/legacy: `INFRA_GITHUB_TOKEN` (org PAT upserted by `infra configure`; unused by App-mode `resolve-github-token`, still accepted as a workflow input for compatibility).
 
 **GCP vars:** `WIF_PROVIDER`, `GCP_SA`, `GCP_PROJECT_ID`, `GCP_REGION` (as used by your stacks)
 
