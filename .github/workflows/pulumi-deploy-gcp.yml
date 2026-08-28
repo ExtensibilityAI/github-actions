@@ -118,7 +118,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Resolve GitHub token
-        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.1
+        id: github-token
+        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.2
         with:
           infra-github-token: ${{ secrets.INFRA_GITHUB_TOKEN }}
           app-id: ${{ secrets.INFRA_GITHUB_APP_ID }}
@@ -142,6 +143,9 @@ jobs:
           stack: ${{ needs.detect-changes.outputs.pulumi_env }}
       - name: Pulumi up (platform)
         working-directory: pulumi/platform
+        env:
+          GITHUB_ACCESS_TOKEN: ${{ steps.github-token.outputs.token }}
+          GH_TOKEN: ${{ steps.github-token.outputs.token }}
         run: |
           set -euo pipefail
           uv run pulumi stack select "${{ steps.pulumi_org.outputs.pulumi-org }}/${{ needs.detect-changes.outputs.platform_stack_name }}/${{ needs.detect-changes.outputs.pulumi_env }}" --create
@@ -171,7 +175,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Resolve GitHub token
-        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.1
+        id: github-token
+        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.2
         with:
           infra-github-token: ${{ secrets.INFRA_GITHUB_TOKEN }}
           app-id: ${{ secrets.INFRA_GITHUB_APP_ID }}
@@ -196,6 +201,9 @@ jobs:
           fallback-pulumi-dir: pulumi/platform
       - name: Pulumi up (app stack)
         working-directory: ${{ matrix.workdir }}
+        env:
+          GITHUB_ACCESS_TOKEN: ${{ steps.github-token.outputs.token }}
+          GH_TOKEN: ${{ steps.github-token.outputs.token }}
         run: |
           set -euo pipefail
           uv run pulumi stack select "${{ steps.pulumi_org.outputs.pulumi-org }}/$(grep '^name:' Pulumi.yaml | awk '{print $2}')/${{ needs.detect-changes.outputs.pulumi_env }}" --create

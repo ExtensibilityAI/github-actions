@@ -30,7 +30,7 @@ Centralize CI/CD patterns (GCP GKE/Helm deploy, package publish, Pulumi) so prod
 
 - Semver tags: `vMAJOR.MINOR.PATCH` (annotated)
 - Moving major tag: `v2` points at the latest `v2.x.y`
-- Callers: `ExtensibilityAI/github-actions/<action>@v2.1.1` or reusable workflow path `@v2.1.1`
+- Callers: `ExtensibilityAI/github-actions/<action>@v2.1.2` or reusable workflow path `@v2.1.2`
 
 Release via Actions → **Release** → `workflow_dispatch` with version input (from `main` or `trunk`). The job runs in the GitHub Environment **`release`** — configure required reviewers on that environment before cutting tags.
 
@@ -66,7 +66,7 @@ actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`).
 | --- | --- |
 | `setup-pypi-auth` | WIF + export `UV_INDEX_*` for Artifact Registry PyPI |
 | `setup-codeartifact-auth` | AWS OIDC + CodeArtifact token for uv |
-| `resolve-github-token` | Mint GitHub App installation token as `GITHUB_TOKEN` / `GITHUB_ACCESS_TOKEN` |
+| `resolve-github-token` | Mint GitHub App installation token as `GITHUB_ACCESS_TOKEN` / `GH_TOKEN` (do not overwrite reserved `GITHUB_TOKEN`) |
 | `resolve-pulumi-org` | `uv run infra utils resolve-pulumi-org` |
 | `detect-changes` | `uv run infra utils detect-changes` (platform → apps deploy order) |
 | `detect-path-changes` | Git diff whether a directory prefix changed |
@@ -108,7 +108,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/ci-python-package.yml@v2.1.1
+    uses: ExtensibilityAI/github-actions/.github/workflows/ci-python-package.yml@v2.1.2
     with:
       needs_pypi_auth: true
       uv_index_prefix: EXTENSIBILITY_AI
@@ -119,7 +119,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/publish-python-package.yml@v2.1.1
+    uses: ExtensibilityAI/github-actions/.github/workflows/publish-python-package.yml@v2.1.2
     with:
       uv_index_prefix: EXTENSIBILITY_AI
     secrets: inherit
@@ -133,7 +133,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/deploy-gke-app.yml@v2.1.1
+    uses: ExtensibilityAI/github-actions/.github/workflows/deploy-gke-app.yml@v2.1.2
     with:
       images: |
         [{"name":"lims-api","dockerfile":"backend/Dockerfile","needs_pypi_auth":true,"build_secret_env":"UV_INDEX_EXTENSIBILITY_AI_PYPI_PASSWORD","role":"api"},
@@ -169,7 +169,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-gcp.yml@v2.1.1
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-gcp.yml@v2.1.2
     with:
       environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
       slug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.slug || '' }}
@@ -185,7 +185,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-aws.yml@v2.1.1
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-aws.yml@v2.1.2
     with:
       platform_stack_name: infrastructure-core-aws  # or your repo’s platform project name
       environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
@@ -202,7 +202,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-gcp.yml@v2.1.1
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-gcp.yml@v2.1.2
     with:
       slug: ${{ github.event.inputs.slug }}
       environments: ${{ github.event.inputs.environments }}
@@ -217,7 +217,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-aws.yml@v2.1.1
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-aws.yml@v2.1.2
     with:
       slug: ${{ github.event.inputs.slug }}
       environments: ${{ github.event.inputs.environments }}

@@ -1,9 +1,10 @@
 name: Resolve GitHub token
 description: |
   Mint an installation access token via actions/create-github-app-token and export
-  it as GITHUB_TOKEN and GITHUB_ACCESS_TOKEN for pulumi-github.
-  create-github-app-token already masks the token in logs; do not ::add-mask::
-  again before GITHUB_ENV (that can redact GITHUB_TOKEN to *** and 401 later).
+  it as GITHUB_ACCESS_TOKEN and GH_TOKEN for pulumi-github.
+  Do not write reserved GITHUB_TOKEN to GITHUB_ENV — GitHub ignores that overwrite
+  in reusable workflows, so later steps keep the default Actions token (scoped to
+  the caller repo) and 401 on other-repo environment APIs.
 inputs:
   infra-github-token:
     description: Unused in GitHub App mode (accepted for workflow compatibility)
@@ -15,6 +16,10 @@ inputs:
   private-key:
     description: Value of secrets.INFRA_GITHUB_APP_PRIVATE_KEY
     required: true
+outputs:
+  token:
+    description: GitHub App installation token
+    value: ${{ steps.app-token.outputs.token }}
 runs:
   using: composite
   steps:
@@ -36,18 +41,18 @@ runs:
           exit 1
         fi
         {
-          echo "GITHUB_TOKEN<<EOF"
-          echo "$APP_TOKEN"
-          echo "EOF"
           echo "GITHUB_ACCESS_TOKEN<<EOF"
           echo "$APP_TOKEN"
           echo "EOF"
+          echo "GH_TOKEN<<EOF"
+          echo "$APP_TOKEN"
+          echo "EOF"
         } >> "$GITHUB_ENV"
-    - name: Verify GITHUB_TOKEN was exported
+    - name: Verify GITHUB_ACCESS_TOKEN was exported
       shell: bash
       run: |
         set -euo pipefail
-        if [ "${#GITHUB_TOKEN}" -lt 20 ]; then
-          echo "::error::GITHUB_TOKEN missing or redacted after export (len=${#GITHUB_TOKEN})"
+        if [ "${#GITHUB_ACCESS_TOKEN}" -lt 20 ]; then
+          echo "::error::GITHUB_ACCESS_TOKEN missing or redacted after export (len=${#GITHUB_ACCESS_TOKEN})"
           exit 1
         fi
