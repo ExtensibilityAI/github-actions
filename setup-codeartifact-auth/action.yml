@@ -23,6 +23,17 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Validate uv index prefix
+      shell: bash
+      env:
+        UV_INDEX_PREFIX: ${{ inputs.uv_index_prefix }}
+      run: |
+        set -euo pipefail
+        if ! [[ "$UV_INDEX_PREFIX" =~ ^[A-Z][A-Z0-9_]{0,62}$ ]]; then
+          echo "::error::uv_index_prefix must match ^[A-Z][A-Z0-9_]{0,62}$"
+          exit 1
+        fi
+
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
       with:

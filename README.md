@@ -12,8 +12,10 @@ Centralize CI/CD patterns (GCP GKE/Helm deploy, package publish, Pulumi) so prod
 | --- | --- |
 | Visibility | Intended **public code-only** once the hardening bar passes (currently private; org Actions access enabled for ExtensibilityAI callers). No secrets in the repo. |
 | Pinning | Callers **must** pin with a release tag (`@v2.x.y`) or commit SHA — never `@main` / `@trunk`. |
-| Identity | GCP Workload Identity Federation must require `attribute.repository` (and prefer repo allowlists). |
-| Secrets | No long-lived cloud keys in GitHub secrets for GCP; use WIF. Pulumi / GitHub App secrets stay in caller environments. |
+| Identity | GCP Workload Identity Federation must require `attribute.repository` (and prefer repo allowlists). See [SECURITY.md](SECURITY.md) for an IAM condition example and caller audit checklist. |
+| Branch filters | Deploy callers must trigger production only from `main` or release tags (`on.push.branches: [main]`). PRs resolve to `staging` via `set-deploy-env`. |
+| Environments | Configure GitHub Environment protection on `prod` (required reviewers). The library `release` workflow uses the `release` environment for tag pushes. |
+| Secrets | No long-lived cloud keys in GitHub secrets for GCP; use WIF. Prefer explicit `secrets:` mappings over `secrets: inherit` when a job needs only `PULUMI_ACCESS_TOKEN` and GitHub App credentials. Pulumi / GitHub App secrets stay in caller environments. |
 | App-agnostic | Reusable workflows/actions must **never** reference product-specific `vars.*` / `secrets.*` names (e.g. `SCAFFOLDER_*`). Callers may pass opaque `KEY=VALUE` blobs via the `migration_extra_env` **secret** (not a `with:` input — GitHub forbids `secrets.*` in reusable workflow inputs). |
 | Third-party actions | Pin third-party actions to full commit SHAs with a `# vN` comment. |
 
@@ -28,9 +30,9 @@ Centralize CI/CD patterns (GCP GKE/Helm deploy, package publish, Pulumi) so prod
 
 - Semver tags: `vMAJOR.MINOR.PATCH` (annotated)
 - Moving major tag: `v2` points at the latest `v2.x.y`
-- Callers: `ExtensibilityAI/github-actions/<action>@v2.0.0` or reusable workflow path `@v2.0.0`
+- Callers: `ExtensibilityAI/github-actions/<action>@v2.1.0` or reusable workflow path `@v2.1.0`
 
-Release via Actions → **Release** → `workflow_dispatch` with version input (from `main` or `trunk`).
+Release via Actions → **Release** → `workflow_dispatch` with version input (from `main` or `trunk`). The job runs in the GitHub Environment **`release`** — configure required reviewers on that environment before cutting tags.
 
 ## How to bump third-party action SHAs
 
@@ -66,7 +68,7 @@ actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`).
 | `setup-codeartifact-auth` | AWS OIDC + CodeArtifact token for uv |
 | `resolve-github-token` | Mint GitHub App installation token as `GITHUB_TOKEN` |
 | `resolve-pulumi-org` | `uv run infra utils resolve-pulumi-org` |
-| `detect-changes` | `uv run infra utils detect-changes` (+ `app_must_finish_first`) |
+| `detect-changes` | `uv run infra utils detect-changes` (platform → apps deploy order) |
 | `detect-path-changes` | Git diff whether a directory prefix changed |
 | `parse-image-matrix` | Normalize JSON image list for deploy matrix |
 | `install-cloud-sql-proxy` | Download + SHA256 verify proxy to `/usr/local/bin` |
@@ -89,8 +91,10 @@ actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`).
 | `ci-python-light.yml` | Lightweight uv sync / import or pytest (no private index) |
 | `ci-compose-config.yml` | bash -n scripts + `docker compose config` |
 | `deploy-gke-app.yml` | Image matrix build, optional migrations/SDK, kubectl or Helm |
-| `pulumi-deploy.yml` | GCP/AWS path-filtered Pulumi platform + app stacks |
-| `pulumi-destroy-app.yml` | Destroy per-slug app stacks |
+| `pulumi-deploy-gcp.yml` | GCP path-filtered Pulumi: platform stack, then app stacks |
+| `pulumi-deploy-aws.yml` | AWS path-filtered Pulumi: platform stack, then app stacks |
+| `pulumi-destroy-app-gcp.yml` | Destroy per-slug GCP app stacks |
+| `pulumi-destroy-app-aws.yml` | Destroy per-slug AWS app stacks |
 
 ## Caller examples
 
@@ -104,7 +108,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/ci-python-package.yml@v2.0.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/ci-python-package.yml@v2.1.0
     with:
       needs_pypi_auth: true
       uv_index_prefix: EXTENSIBILITY_AI
@@ -115,7 +119,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/publish-python-package.yml@v2.0.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/publish-python-package.yml@v2.1.0
     with:
       uv_index_prefix: EXTENSIBILITY_AI
     secrets: inherit
@@ -129,7 +133,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/deploy-gke-app.yml@v2.0.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/deploy-gke-app.yml@v2.1.0
     with:
       images: |
         [{"name":"lims-api","dockerfile":"backend/Dockerfile","needs_pypi_auth":true,"build_secret_env":"UV_INDEX_EXTENSIBILITY_AI_PYPI_PASSWORD","role":"api"},
@@ -164,10 +168,8 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy.yml@v2.0.2
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-gcp.yml@v2.1.0
     with:
-      cloud: gcp
-      # platform_stack_name defaults to infrastructure-core-gcp; override for store repos
       environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
       slug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.slug || '' }}
       target: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || 'both' }}
@@ -182,16 +184,16 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy.yml@v2.0.2
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-aws.yml@v2.1.0
     with:
-      cloud: aws
+      platform_stack_name: infrastructure-core-aws  # or your repo’s platform project name
       environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
       slug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.slug || '' }}
       target: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || 'both' }}
     secrets: inherit
 ```
 
-### Pulumi destroy app
+### Pulumi destroy app (GCP)
 
 ```yaml
 jobs:
@@ -199,9 +201,23 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app.yml@v2.0.2
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-gcp.yml@v2.1.0
     with:
-      cloud: gcp  # or aws
+      slug: ${{ github.event.inputs.slug }}
+      environments: ${{ github.event.inputs.environments }}
+    secrets: inherit
+```
+
+### Pulumi destroy app (AWS)
+
+```yaml
+jobs:
+  destroy:
+    permissions:
+      id-token: write
+      contents: read
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-aws.yml@v2.1.0
+    with:
       slug: ${{ github.event.inputs.slug }}
       environments: ${{ github.event.inputs.environments }}
     secrets: inherit

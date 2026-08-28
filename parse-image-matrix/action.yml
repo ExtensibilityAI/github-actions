@@ -30,7 +30,7 @@ runs:
       run: |
         set -euo pipefail
         python3 <<'PY'
-        import json, os, sys
+        import json, os, re, sys
 
         raw = os.environ.get("IMAGES_JSON", "").strip()
         if not raw:
@@ -50,16 +50,39 @@ runs:
             "frontend": ("frontend", "frontend"),
             "app": ("app", "app"),
         }
+        key_re = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+
+        def bad(msg):
+            print(f"::error::{msg}", file=sys.stderr)
+            sys.exit(1)
+
+        def check_path(field, value):
+            if not isinstance(value, str) or not value:
+                bad(f"{field} must be a non-empty string")
+            if ".." in value.split("/"):
+                bad(f"{field} must not contain '..' segments")
+            if value.startswith("/"):
+                bad(f"{field} must be a relative path")
+
         out = []
         for i, item in enumerate(images):
             if not isinstance(item, dict):
-                print(f"::error::images[{i}] must be an object", file=sys.stderr)
-                sys.exit(1)
+                bad(f"images[{i}] must be an object")
             name = item.get("name")
             if not name or not isinstance(name, str):
-                print(f"::error::images[{i}].name is required", file=sys.stderr)
-                sys.exit(1)
+                bad(f"images[{i}].name is required")
+            if "/" in name or ".." in name:
+                bad(f"images[{i}].name must not contain '/' or '..'")
             role = item.get("role") or ""
+            if role and role not in role_defaults:
+                bad(f"images[{i}].role must be api, frontend, app, or empty")
+            context = item.get("context") or "."
+            dockerfile = item.get("dockerfile") or "Dockerfile"
+            check_path(f"images[{i}].context", context)
+            check_path(f"images[{i}].dockerfile", dockerfile)
+            build_secret_env = item.get("build_secret_env") or ""
+            if build_secret_env and not key_re.match(build_secret_env):
+                bad(f"images[{i}].build_secret_env must be an uppercase env var name")
             dep, cont = role_defaults.get(role, (None, None))
             entry = {
                 "name": name,

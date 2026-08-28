@@ -37,7 +37,19 @@ jobs:
       - name: Run actionlint
         run: |
           set -euo pipefail
-          # Only lint GitHub Actions workflows. Composite action.yml files are not
-          # workflows; passing them makes actionlint treat them as invalid workflows.
-          mapfile -t files < <(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \))
-          actionlint "${files[@]}"
+          mapfile -t workflow_files < <(find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \))
+          actionlint "${workflow_files[@]}"
+
+      - name: Validate composite action metadata
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' action_file; do
+            if ! grep -q '^runs:' "$action_file"; then
+              echo "::error::$action_file is missing a runs: section"
+              exit 1
+            fi
+            if ! grep -q 'using: composite' "$action_file"; then
+              echo "::error::$action_file must declare using: composite"
+              exit 1
+            fi
+          done < <(find . -path './.git' -prune -o -name 'action.yml' -print0)

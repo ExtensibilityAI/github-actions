@@ -32,15 +32,24 @@ runs:
         DISPATCH_ENV: ${{ inputs.dispatch_environment }}
         EVENT_NAME: ${{ github.event_name }}
         REF_TYPE: ${{ github.ref_type }}
+        GITHUB_REF: ${{ github.ref }}
       run: |
         set -euo pipefail
         if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
           ENV="${DISPATCH_ENV:-staging}"
         elif [ "$EVENT_NAME" = "pull_request" ]; then
           ENV=staging
-        else
-          # push to main, tags, etc. → prod
+        elif [ "$REF_TYPE" = "tag" ] || [ "$GITHUB_REF" = "refs/heads/main" ]; then
           ENV=prod
+        else
+          ENV=staging
         fi
+        case "$ENV" in
+          staging|prod) ;;
+          *)
+            echo "::error::environment must be staging or prod (got: $ENV)"
+            exit 1
+            ;;
+        esac
         echo "env=$ENV" >> "$GITHUB_OUTPUT"
         echo "stack=$ENV" >> "$GITHUB_OUTPUT"

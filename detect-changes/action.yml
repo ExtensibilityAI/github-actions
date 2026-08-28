@@ -37,9 +37,6 @@ outputs:
   run_app_stacks:
     description: Whether to run app stacks
     value: ${{ steps.detect.outputs.run_app_stacks }}
-  app_must_finish_first:
-    description: Whether app stacks must finish before platform (AWS-style)
-    value: ${{ steps.detect.outputs.app_must_finish_first }}
 runs:
   using: composite
   steps:

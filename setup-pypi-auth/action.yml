@@ -19,6 +19,17 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Validate uv index prefix
+      shell: bash
+      env:
+        UV_INDEX_PREFIX: ${{ inputs.uv_index_prefix }}
+      run: |
+        set -euo pipefail
+        if ! [[ "$UV_INDEX_PREFIX" =~ ^[A-Z][A-Z0-9_]{0,62}$ ]]; then
+          echo "::error::uv_index_prefix must match ^[A-Z][A-Z0-9_]{0,62}$"
+          exit 1
+        fi
+
     - name: Authenticate to GCP (WIF)
       uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
       with:

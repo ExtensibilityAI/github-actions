@@ -2,12 +2,6 @@ name: CI compose config
 
 on:
   workflow_call:
-    inputs:
-      compose_files:
-        description: Optional compose file args (e.g. -f docker-compose.yml)
-        type: string
-        required: false
-        default: ''
 
 jobs:
   compose_config:
@@ -31,7 +25,5 @@ jobs:
       - name: docker compose config
         run: |
           set -euo pipefail
-          EXTRA="${{ inputs.compose_files }}"
-          # shellcheck disable=SC2086
-          docker compose $EXTRA config >/dev/null
+          docker compose config >/dev/null
           echo "compose config OK"

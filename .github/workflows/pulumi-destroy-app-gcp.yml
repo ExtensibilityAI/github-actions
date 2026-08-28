@@ -1,12 +1,8 @@
-name: Pulumi Destroy App
+name: Pulumi Destroy App (GCP)
 
 on:
   workflow_call:
     inputs:
-      cloud:
-        description: gcp or aws
-        type: string
-        required: true
       slug:
         description: App slug (required)
         type: string
@@ -37,7 +33,6 @@ jobs:
         env:
           INPUT_SLUG: ${{ inputs.slug }}
           INPUT_ENVIRONMENTS: ${{ inputs.environments }}
-          CLOUD: ${{ inputs.cloud }}
         run: |
           set -euo pipefail
           slug="${INPUT_SLUG:-}"
@@ -46,23 +41,12 @@ jobs:
             echo "::error::destroy requires slug"
             exit 1
           fi
-          if [ "$CLOUD" != "gcp" ] && [ "$CLOUD" != "aws" ]; then
-            echo "::error::cloud must be gcp or aws"
-            exit 1
-          fi
           envs="${INPUT_ENVIRONMENTS:-both}"
           entries=()
           case "$envs" in
             staging) stacks="staging" ;;
             prod) stacks="prod" ;;
-            # GCP: prod first (owns cross-stack GAR IAM refs to staging SA)
-            both)
-              if [ "$CLOUD" = "gcp" ]; then
-                stacks="prod staging"
-              else
-                stacks="staging prod"
-              fi
-              ;;
+            both) stacks="prod staging" ;;
             *)
               echo "::error::environments must be staging, prod, or both"
               exit 1
@@ -89,7 +73,7 @@ jobs:
     environment: ${{ matrix.pulumi_env }}
     env:
       PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-      INFRA_CLI_SKIP_GCLOUD_CREDENTIALS: ${{ inputs.cloud == 'gcp' && 'true' || '' }}
+      INFRA_CLI_SKIP_GCLOUD_CREDENTIALS: 'true'
     permissions:
       id-token: write
       contents: read
@@ -97,7 +81,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Resolve GitHub token
-        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.0.0
+        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.0
         with:
           infra-github-token: ${{ secrets.INFRA_GITHUB_TOKEN }}
           app-id: ${{ secrets.INFRA_GITHUB_APP_ID }}
@@ -106,23 +90,15 @@ jobs:
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Authenticate to GCP for PyPI
-        if: inputs.cloud == 'gcp'
-        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.0.0
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.0
         with:
           wif_provider: ${{ vars.WIF_PROVIDER }}
           pypi_sa: ${{ vars.GCP_SA }}
           uv_index_prefix: ${{ inputs.uv_index_prefix }}
 
       - name: Install GKE auth plugin
-        if: inputs.cloud == 'gcp' && inputs.install_gke_auth_plugin
+        if: inputs.install_gke_auth_plugin
         run: gcloud components install gke-gcloud-auth-plugin --quiet
-
-      - name: Configure AWS credentials
-        if: inputs.cloud == 'aws'
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
 
       - run: uv sync
 

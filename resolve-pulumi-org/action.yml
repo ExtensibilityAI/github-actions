@@ -22,14 +22,18 @@ runs:
   steps:
     - id: resolve
       shell: bash
+      env:
+        PULUMI_DIR: ${{ inputs.pulumi-dir }}
+        STACK: ${{ inputs.stack }}
+        FALLBACK_DIR: ${{ inputs.fallback-pulumi-dir }}
       run: |
         set -euo pipefail
         if ! uv run infra --help &>/dev/null; then
           echo "::error::infra CLI unavailable — run 'uv sync' at the repo root before this action"
           exit 1
         fi
-        args=(--pulumi-dir "${{ inputs.pulumi-dir }}" --stack "${{ inputs.stack }}")
-        if [ -n "${{ inputs.fallback-pulumi-dir }}" ]; then
-          args+=(--fallback-pulumi-dir "${{ inputs.fallback-pulumi-dir }}")
+        args=(--pulumi-dir "${PULUMI_DIR}" --stack "${STACK}")
+        if [ -n "${FALLBACK_DIR:-}" ]; then
+          args+=(--fallback-pulumi-dir "${FALLBACK_DIR}")
         fi
         echo "pulumi_org=$(uv run infra utils resolve-pulumi-org "${args[@]}")" >> "$GITHUB_OUTPUT"
