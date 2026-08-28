@@ -164,14 +164,53 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy.yml@v2.0.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy.yml@v2.0.2
     with:
       cloud: gcp
-      platform_stack_name: infrastructure-core-gcp
-      environment: ${{ github.event.inputs.environment || '' }}
-      slug: ${{ github.event.inputs.slug || '' }}
-      target: ${{ github.event.inputs.target || 'both' }}
+      # platform_stack_name defaults to infrastructure-core-gcp; override for store repos
+      environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
+      slug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.slug || '' }}
+      target: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || 'both' }}
     secrets: inherit
 ```
+
+### Pulumi (AWS)
+
+```yaml
+jobs:
+  deploy:
+    permissions:
+      id-token: write
+      contents: read
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy.yml@v2.0.2
+    with:
+      cloud: aws
+      environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
+      slug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.slug || '' }}
+      target: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || 'both' }}
+    secrets: inherit
+```
+
+### Pulumi destroy app
+
+```yaml
+jobs:
+  destroy:
+    permissions:
+      id-token: write
+      contents: read
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app.yml@v2.0.2
+    with:
+      cloud: gcp  # or aws
+      slug: ${{ github.event.inputs.slug }}
+      environments: ${{ github.event.inputs.environments }}
+    secrets: inherit
+```
+
+**Required caller secrets:** `PULUMI_ACCESS_TOKEN`, `INFRA_GITHUB_TOKEN`, `INFRA_GITHUB_APP_ID`, `INFRA_GITHUB_APP_PRIVATE_KEY`
+
+**GCP vars:** `WIF_PROVIDER`, `GCP_SA`, `GCP_PROJECT_ID`, `GCP_REGION` (as used by your stacks)
+
+**AWS vars:** `AWS_ROLE_ARN`, `AWS_REGION`, `CODEARTIFACT_DOMAIN` (for CodeArtifact auth)
 
 Composite actions that nest other composites **must** use fully-qualified `ExtensibilityAI/github-actions/<name>@vX.Y.Z` pins. Relative `./` paths resolve in the *caller* workspace and break cross-repo.
