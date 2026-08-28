@@ -38,7 +38,7 @@ jobs:
     outputs:
       pulumi_env: ${{ steps.env.outputs.env }}
     steps:
-      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.1.0
+      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.1.1
         id: env
         with:
           mode: app
@@ -64,7 +64,7 @@ jobs:
           fetch-depth: 0
 
       - name: Authenticate to GCP for PyPI
-        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.0
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.1
         with:
           wif_provider: ${{ vars.WIF_PROVIDER }}
           pypi_sa: ${{ vars.GCP_SA }}
@@ -94,7 +94,7 @@ jobs:
 
       - name: Detect changed stacks
         id: detect
-        uses: ExtensibilityAI/github-actions/detect-changes@v2.1.0
+        uses: ExtensibilityAI/github-actions/detect-changes@v2.1.1
         with:
           event-name: ${{ github.event_name }}
           diff-range: ${{ steps.diff.outputs.range }}
@@ -118,14 +118,14 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Resolve GitHub token
-        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.0
+        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.1
         with:
           infra-github-token: ${{ secrets.INFRA_GITHUB_TOKEN }}
           app-id: ${{ secrets.INFRA_GITHUB_APP_ID }}
           private-key: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
       - name: Authenticate to GCP for PyPI
-        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.0
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.1
         with:
           wif_provider: ${{ vars.WIF_PROVIDER }}
           pypi_sa: ${{ vars.GCP_SA }}
@@ -136,7 +136,7 @@ jobs:
       - run: uv sync
       - name: Resolve Pulumi org
         id: pulumi_org
-        uses: ExtensibilityAI/github-actions/resolve-pulumi-org@v2.1.0
+        uses: ExtensibilityAI/github-actions/resolve-pulumi-org@v2.1.1
         with:
           pulumi-dir: pulumi/platform
           stack: ${{ needs.detect-changes.outputs.pulumi_env }}
@@ -171,14 +171,14 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Resolve GitHub token
-        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.0
+        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.1
         with:
           infra-github-token: ${{ secrets.INFRA_GITHUB_TOKEN }}
           app-id: ${{ secrets.INFRA_GITHUB_APP_ID }}
           private-key: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
       - name: Authenticate to GCP for PyPI
-        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.0
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.1
         with:
           wif_provider: ${{ vars.WIF_PROVIDER }}
           pypi_sa: ${{ vars.GCP_SA }}
@@ -189,7 +189,7 @@ jobs:
       - run: uv sync
       - name: Resolve Pulumi org
         id: pulumi_org
-        uses: ExtensibilityAI/github-actions/resolve-pulumi-org@v2.1.0
+        uses: ExtensibilityAI/github-actions/resolve-pulumi-org@v2.1.1
         with:
           pulumi-dir: ${{ matrix.workdir }}
           stack: ${{ needs.detect-changes.outputs.pulumi_env }}

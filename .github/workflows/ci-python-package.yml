@@ -50,7 +50,7 @@ jobs:
 
       - name: Authenticate to PyPI
         if: inputs.needs_pypi_auth
-        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.0
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.1
         with:
           wif_provider: ${{ vars.WIF_PROVIDER }}
           pypi_sa: ${{ vars.PYPI_SA }}
