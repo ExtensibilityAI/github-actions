@@ -43,7 +43,7 @@ Use this when onboarding a new repository that consumes `ExtensibilityAI/github-
 
 ### Pinning
 
-- [ ] Pin exact semver tags (`@v2.1.0`) or commit SHAs — not `@main`, `@trunk`, or floating `@v2` in production.
+- [ ] Pin exact semver tags (`@v2.1.1`) or commit SHAs — not `@main`, `@trunk`, or floating `@v2` in production.
 
 ## Example GCP WIF repository binding
 

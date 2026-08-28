@@ -6,7 +6,8 @@ on:
       images:
         description: >
           JSON array of image specs. Each object needs name; optional fields:
-          dockerfile, context, role (api|frontend|app), deployment, container,
+          dockerfile, context, role (Kubernetes DNS label, e.g. api|frontend|app),
+          deployment, container,
           needs_pypi_auth, build_secret_env.
         type: string
         required: true
@@ -100,12 +101,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ExtensibilityAI/github-actions/parse-image-matrix@v2.1.0
+      - uses: ExtensibilityAI/github-actions/parse-image-matrix@v2.1.1
         id: images
         with:
           images: ${{ inputs.images }}
 
-      - uses: ExtensibilityAI/github-actions/detect-path-changes@v2.1.0
+      - uses: ExtensibilityAI/github-actions/detect-path-changes@v2.1.1
         id: detect
         if: inputs.publish_sdk
         with:
@@ -117,7 +118,7 @@ jobs:
         id: detect-skip
         run: echo "changed=false" >> "$GITHUB_OUTPUT"
 
-      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.1.0
+      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.1.1
         id: env
         with:
           mode: app
@@ -137,7 +138,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: ExtensibilityAI/github-actions/docker-build-push@v2.1.0
+      - uses: ExtensibilityAI/github-actions/docker-build-push@v2.1.1
         id: build
         with:
           image_name: ${{ matrix.name }}
@@ -218,7 +219,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: ExtensibilityAI/github-actions/publish-python-sdk@v2.1.0
+      - uses: ExtensibilityAI/github-actions/publish-python-sdk@v2.1.1
         with:
           deploy_env: ${{ needs.set-env.outputs.env }}
           working_directory: ${{ inputs.sdk_directory }}
@@ -242,7 +243,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: ExtensibilityAI/github-actions/cloud-sql-migrate@v2.1.0
+      - uses: ExtensibilityAI/github-actions/cloud-sql-migrate@v2.1.1
         with:
           gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
           gcp_region: ${{ vars.GCP_REGION || 'us-central1' }}
@@ -292,7 +293,7 @@ jobs:
 
       - name: Kubectl rollout
         if: inputs.deploy_method == 'kubectl'
-        uses: ExtensibilityAI/github-actions/kubectl-rollout@v2.1.0
+        uses: ExtensibilityAI/github-actions/kubectl-rollout@v2.1.1
         with:
           images_json: ${{ needs.set-env.outputs.matrix }}
           changed_by_name: ${{ needs.build-summary.outputs.changed_by_name }}
@@ -302,7 +303,7 @@ jobs:
 
       - name: Helm rollout
         if: inputs.deploy_method == 'helm'
-        uses: ExtensibilityAI/github-actions/helm-rollout@v2.1.0
+        uses: ExtensibilityAI/github-actions/helm-rollout@v2.1.1
         with:
           helm_chart: ${{ inputs.helm_chart }}
           helm_image_repository_suffix: ${{ inputs.helm_image_repository_suffix || needs.set-env.outputs.first_name }}

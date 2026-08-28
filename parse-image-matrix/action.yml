@@ -2,7 +2,7 @@ name: Parse image matrix
 description: >
   Validate and normalize a JSON array of container image specs for deploy-gke-app.
   Applies defaults for context, dockerfile, deployment, container, needs_pypi_auth,
-  and build_secret_env. Optional role (api|frontend|app) fills deployment/container.
+  and build_secret_env. Optional role (Kubernetes DNS label) fills deployment/container.
 
 inputs:
   images:
@@ -51,6 +51,7 @@ runs:
             "app": ("app", "app"),
         }
         key_re = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+        dns_label_re = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 
         def bad(msg):
             print(f"::error::{msg}", file=sys.stderr)
@@ -74,8 +75,11 @@ runs:
             if "/" in name or ".." in name:
                 bad(f"images[{i}].name must not contain '/' or '..'")
             role = item.get("role") or ""
-            if role and role not in role_defaults:
-                bad(f"images[{i}].role must be api, frontend, app, or empty")
+            if role and not dns_label_re.fullmatch(role):
+                bad(
+                    f"images[{i}].role must be a Kubernetes DNS label "
+                    "(lowercase alphanumeric and hyphens) or empty"
+                )
             context = item.get("context") or "."
             dockerfile = item.get("dockerfile") or "Dockerfile"
             check_path(f"images[{i}].context", context)
@@ -83,7 +87,7 @@ runs:
             build_secret_env = item.get("build_secret_env") or ""
             if build_secret_env and not key_re.match(build_secret_env):
                 bad(f"images[{i}].build_secret_env must be an uppercase env var name")
-            dep, cont = role_defaults.get(role, (None, None))
+            dep, cont = role_defaults.get(role, (role or None, role or None))
             entry = {
                 "name": name,
                 "context": item.get("context") or ".",

@@ -43,7 +43,7 @@ runs:
   using: composite
   steps:
     - name: Authenticate to PyPI
-      uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.0
+      uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.1
       with:
         wif_provider: ${{ inputs.wif_provider }}
         pypi_sa: ${{ inputs.pypi_sa }}
@@ -72,7 +72,7 @@ runs:
         echo "::add-mask::$PASSWORD"
         echo "password=$PASSWORD" >> "$GITHUB_OUTPUT"
 
-    - uses: ExtensibilityAI/github-actions/install-cloud-sql-proxy@v2.1.0
+    - uses: ExtensibilityAI/github-actions/install-cloud-sql-proxy@v2.1.1
 
     - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
