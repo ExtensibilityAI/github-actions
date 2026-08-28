@@ -100,12 +100,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ExtensibilityAI/github-actions/parse-image-matrix@v2.0.0
+      - uses: ExtensibilityAI/github-actions/parse-image-matrix@v2.1.0
         id: images
         with:
           images: ${{ inputs.images }}
 
-      - uses: ExtensibilityAI/github-actions/detect-path-changes@v2.0.0
+      - uses: ExtensibilityAI/github-actions/detect-path-changes@v2.1.0
         id: detect
         if: inputs.publish_sdk
         with:
@@ -117,7 +117,7 @@ jobs:
         id: detect-skip
         run: echo "changed=false" >> "$GITHUB_OUTPUT"
 
-      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.0.0
+      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.1.0
         id: env
         with:
           mode: app
@@ -137,7 +137,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: ExtensibilityAI/github-actions/docker-build-push@v2.0.0
+      - uses: ExtensibilityAI/github-actions/docker-build-push@v2.1.0
         id: build
         with:
           image_name: ${{ matrix.name }}
@@ -153,20 +153,21 @@ jobs:
           build_secret_env: ${{ matrix.build_secret_env }}
 
       - name: Write image-changed artifact
+        id: artifact
         env:
           NAME: ${{ matrix.name }}
           CHANGED: ${{ steps.build.outputs.image_changed }}
         run: |
           set -euo pipefail
           mkdir -p image-changed
-          # sanitize name for path
-          SAFE=$(echo "$NAME" | tr '/' '_')
-          echo "$CHANGED" > "image-changed/${SAFE}"
-          echo "$NAME" > "image-changed/${SAFE}.name"
+          HASH=$(python3 -c "import hashlib, os; print(hashlib.sha256(os.environ['NAME'].encode()).hexdigest()[:16])")
+          echo "$CHANGED" > "image-changed/${HASH}"
+          echo "$NAME" > "image-changed/${HASH}.name"
+          echo "stem=${HASH}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: image-changed-${{ matrix.name }}
+          name: image-changed-${{ steps.artifact.outputs.stem }}
           path: image-changed/
           retention-days: 1
 
@@ -217,7 +218,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: ExtensibilityAI/github-actions/publish-python-sdk@v2.0.0
+      - uses: ExtensibilityAI/github-actions/publish-python-sdk@v2.1.0
         with:
           deploy_env: ${{ needs.set-env.outputs.env }}
           working_directory: ${{ inputs.sdk_directory }}
@@ -241,7 +242,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: ExtensibilityAI/github-actions/cloud-sql-migrate@v2.0.0
+      - uses: ExtensibilityAI/github-actions/cloud-sql-migrate@v2.1.0
         with:
           gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
           gcp_region: ${{ vars.GCP_REGION || 'us-central1' }}
@@ -291,7 +292,7 @@ jobs:
 
       - name: Kubectl rollout
         if: inputs.deploy_method == 'kubectl'
-        uses: ExtensibilityAI/github-actions/kubectl-rollout@v2.0.0
+        uses: ExtensibilityAI/github-actions/kubectl-rollout@v2.1.0
         with:
           images_json: ${{ needs.set-env.outputs.matrix }}
           changed_by_name: ${{ needs.build-summary.outputs.changed_by_name }}
@@ -301,7 +302,7 @@ jobs:
 
       - name: Helm rollout
         if: inputs.deploy_method == 'helm'
-        uses: ExtensibilityAI/github-actions/helm-rollout@v2.0.0
+        uses: ExtensibilityAI/github-actions/helm-rollout@v2.1.0
         with:
           helm_chart: ${{ inputs.helm_chart }}
           helm_image_repository_suffix: ${{ inputs.helm_image_repository_suffix || needs.set-env.outputs.first_name }}

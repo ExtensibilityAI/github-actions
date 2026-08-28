@@ -53,7 +53,7 @@ runs:
           fi
         fi
         changed=$(git diff --name-only "$DIFF_RANGE" 2>/dev/null || git diff --name-only "${EMPTY_TREE}" HEAD)
-        if echo "$changed" | grep -q "^${PREFIX}/"; then
+        if echo "$changed" | grep -F -q "${PREFIX}/"; then
           echo "changed=true" >> "$GITHUB_OUTPUT"
         else
           echo "changed=false" >> "$GITHUB_OUTPUT"

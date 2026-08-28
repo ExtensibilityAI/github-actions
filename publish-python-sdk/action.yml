@@ -33,7 +33,7 @@ runs:
       run: uv python install 3.11
 
     - name: Authenticate to PyPI
-      uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.0.0
+      uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.0
       with:
         wif_provider: ${{ inputs.wif_provider }}
         pypi_sa: ${{ inputs.pypi_sa }}

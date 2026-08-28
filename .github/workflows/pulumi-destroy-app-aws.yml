@@ -1,0 +1,96 @@
+name: Pulumi Destroy App (AWS)
+
+on:
+  workflow_call:
+    inputs:
+      slug:
+        description: App slug (required)
+        type: string
+        required: true
+      environments:
+        description: staging, prod, or both
+        type: string
+        required: false
+        default: both
+      uv_index_prefix:
+        type: string
+        required: false
+        default: EXTENSIBILITY_AI
+
+jobs:
+  detect-destroy:
+    runs-on: ubuntu-latest
+    outputs:
+      destroy_slug: ${{ steps.detect.outputs.destroy_slug }}
+      destroy_matrix: ${{ steps.detect.outputs.destroy_matrix }}
+    steps:
+      - name: Validate destroy inputs
+        id: detect
+        env:
+          INPUT_SLUG: ${{ inputs.slug }}
+          INPUT_ENVIRONMENTS: ${{ inputs.environments }}
+        run: |
+          set -euo pipefail
+          slug="${INPUT_SLUG:-}"
+          slug="${slug// /}"
+          if [ -z "$slug" ]; then
+            echo "::error::destroy requires slug"
+            exit 1
+          fi
+          envs="${INPUT_ENVIRONMENTS:-both}"
+          entries=()
+          case "$envs" in
+            staging) stacks="staging" ;;
+            prod) stacks="prod" ;;
+            both) stacks="staging prod" ;;
+            *)
+              echo "::error::environments must be staging, prod, or both"
+              exit 1
+              ;;
+          esac
+          for s in $stacks; do
+            entries+=("{\"slug\":\"${slug}\",\"pulumi_env\":\"${s}\"}")
+          done
+          matrix=$(printf '%s\n' "${entries[@]}" | jq -s -c '.')
+          echo "destroy_slug=$slug" >> "$GITHUB_OUTPUT"
+          echo "destroy_matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  destroy-app-stacks:
+    needs: detect-destroy
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJson(needs.detect-destroy.outputs.destroy_matrix) }}
+    concurrency:
+      group: destroy-${{ matrix.slug }}-${{ matrix.pulumi_env }}
+      cancel-in-progress: false
+    environment: ${{ matrix.pulumi_env }}
+    env:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Resolve GitHub token
+        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.0
+        with:
+          infra-github-token: ${{ secrets.INFRA_GITHUB_TOKEN }}
+          app-id: ${{ secrets.INFRA_GITHUB_APP_ID }}
+          private-key: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - run: uv sync
+
+      - name: Pulumi destroy (app stack)
+        run: uv run infra app-destroy "${{ matrix.slug }}" --stack "${{ matrix.pulumi_env }}"

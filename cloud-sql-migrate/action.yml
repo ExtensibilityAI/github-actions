@@ -43,7 +43,7 @@ runs:
   using: composite
   steps:
     - name: Authenticate to PyPI
-      uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.0.0
+      uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.0
       with:
         wif_provider: ${{ inputs.wif_provider }}
         pypi_sa: ${{ inputs.pypi_sa }}
@@ -72,7 +72,7 @@ runs:
         echo "::add-mask::$PASSWORD"
         echo "password=$PASSWORD" >> "$GITHUB_OUTPUT"
 
-    - uses: ExtensibilityAI/github-actions/install-cloud-sql-proxy@v2.0.0
+    - uses: ExtensibilityAI/github-actions/install-cloud-sql-proxy@v2.1.0
 
     - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
@@ -89,18 +89,34 @@ runs:
         if [ -z "${EXTRA_ENV:-}" ]; then
           exit 0
         fi
-        while IFS= read -r line || [ -n "$line" ]; do
-          # skip blank lines and comments
-          [ -z "$line" ] && continue
-          case "$line" in
-            \#*) continue ;;
-          esac
-          if [[ "$line" != *=* ]]; then
-            echo "::warning::Ignoring migration_extra_env line without '=': $line"
-            continue
-          fi
-          echo "$line" >> "$GITHUB_ENV"
-        done <<< "$EXTRA_ENV"
+        python3 <<'PY'
+        import os, re, sys
+
+        key_re = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+        extra = os.environ.get("EXTRA_ENV", "")
+        gh_env = os.environ.get("GITHUB_ENV")
+        if not gh_env:
+            print("::error::GITHUB_ENV is not set", file=sys.stderr)
+            sys.exit(1)
+
+        for lineno, raw in enumerate(extra.splitlines(), start=1):
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                print(f"::error::Invalid migration_extra_env at line {lineno}: missing '='", file=sys.stderr)
+                sys.exit(1)
+            key, value = line.split("=", 1)
+            if not key_re.match(key):
+                print(f"::error::Invalid migration_extra_env key at line {lineno}", file=sys.stderr)
+                sys.exit(1)
+            if any(ch in value for ch in "\n\r"):
+                print(f"::error::Invalid migration_extra_env value at line {lineno}: embedded newline", file=sys.stderr)
+                sys.exit(1)
+            print(f"::add-mask::{value}")
+            with open(gh_env, "a", encoding="utf-8") as fh:
+                fh.write(f"{key}={value}\n")
+        PY
 
     - name: Run migrations
       shell: bash

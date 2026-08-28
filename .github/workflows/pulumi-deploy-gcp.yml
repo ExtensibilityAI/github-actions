@@ -1,0 +1,202 @@
+name: Pulumi Deploy (GCP)
+
+on:
+  workflow_call:
+    inputs:
+      platform_stack_name:
+        description: Pulumi project name for platform stack
+        type: string
+        required: false
+        default: infrastructure-core-gcp
+      uv_index_prefix:
+        type: string
+        required: false
+        default: EXTENSIBILITY_AI
+      install_gke_auth_plugin:
+        type: boolean
+        required: false
+        default: true
+      environment:
+        description: staging or prod (workflow_dispatch); empty = derive from event
+        type: string
+        required: false
+        default: ''
+      slug:
+        description: App slug(s), comma-separated; empty = detect from git diff
+        type: string
+        required: false
+        default: ''
+      target:
+        description: app, platform, or both
+        type: string
+        required: false
+        default: both
+
+jobs:
+  resolve-env:
+    runs-on: ubuntu-latest
+    outputs:
+      pulumi_env: ${{ steps.env.outputs.env }}
+    steps:
+      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.1.0
+        id: env
+        with:
+          mode: app
+          dispatch_environment: ${{ inputs.environment || github.event.inputs.environment || '' }}
+
+  detect-changes:
+    needs: resolve-env
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-env.outputs.pulumi_env }}
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      pulumi_env: ${{ needs.resolve-env.outputs.pulumi_env }}
+      app_slugs: ${{ steps.detect.outputs.app_slugs }}
+      app_stack_matrix: ${{ steps.detect.outputs.app_stack_matrix }}
+      run_platform: ${{ steps.detect.outputs.run_platform }}
+      run_app_stacks: ${{ steps.detect.outputs.run_app_stacks }}
+      platform_stack_name: ${{ inputs.platform_stack_name }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Authenticate to GCP for PyPI
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.0
+        with:
+          wif_provider: ${{ vars.WIF_PROVIDER }}
+          pypi_sa: ${{ vars.GCP_SA }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+      - run: uv sync
+
+      - name: Compute diff range
+        id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "range=${BASE_SHA}...HEAD" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "range=HEAD~1...HEAD" >> "$GITHUB_OUTPUT"
+          elif [ "${BEFORE_SHA:-}" = "0000000000000000000000000000000000000000" ] || [ -z "${BEFORE_SHA:-}" ]; then
+            echo "range=HEAD~1...HEAD" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=${BEFORE_SHA}...${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Detect changed stacks
+        id: detect
+        uses: ExtensibilityAI/github-actions/detect-changes@v2.1.0
+        with:
+          event-name: ${{ github.event_name }}
+          diff-range: ${{ steps.diff.outputs.range }}
+          input-env: ${{ needs.resolve-env.outputs.pulumi_env }}
+          input-slug: ${{ inputs.slug || github.event.inputs.slug || '' }}
+          input-target: ${{ inputs.target || github.event.inputs.target || 'both' }}
+
+  platform-stack:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.run_platform == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.detect-changes.outputs.pulumi_env }}
+    concurrency:
+      group: platform-${{ needs.detect-changes.outputs.pulumi_env }}-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Resolve GitHub token
+        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.0
+        with:
+          infra-github-token: ${{ secrets.INFRA_GITHUB_TOKEN }}
+          app-id: ${{ secrets.INFRA_GITHUB_APP_ID }}
+          private-key: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+      - name: Authenticate to GCP for PyPI
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.0
+        with:
+          wif_provider: ${{ vars.WIF_PROVIDER }}
+          pypi_sa: ${{ vars.GCP_SA }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+      - name: Install GKE auth plugin
+        if: inputs.install_gke_auth_plugin
+        run: gcloud components install gke-gcloud-auth-plugin --quiet
+      - run: uv sync
+      - name: Resolve Pulumi org
+        id: pulumi_org
+        uses: ExtensibilityAI/github-actions/resolve-pulumi-org@v2.1.0
+        with:
+          pulumi-dir: pulumi/platform
+          stack: ${{ needs.detect-changes.outputs.pulumi_env }}
+      - name: Pulumi up (platform)
+        working-directory: pulumi/platform
+        run: |
+          set -euo pipefail
+          uv run pulumi stack select "${{ steps.pulumi_org.outputs.pulumi-org }}/${{ needs.detect-changes.outputs.platform_stack_name }}/${{ needs.detect-changes.outputs.pulumi_env }}" --create
+          uv run pulumi up --yes
+
+  app-stacks:
+    needs: [detect-changes, platform-stack]
+    if: |
+      always() &&
+      needs.detect-changes.outputs.run_app_stacks == 'true' &&
+      needs.detect-changes.outputs.app_stack_matrix != '[]' &&
+      (needs.platform-stack.result == 'success' || needs.platform-stack.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: ${{ needs.detect-changes.outputs.pulumi_env }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.detect-changes.outputs.app_stack_matrix) }}
+    concurrency:
+      group: app-${{ matrix.slug }}-${{ needs.detect-changes.outputs.pulumi_env }}-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Resolve GitHub token
+        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.0
+        with:
+          infra-github-token: ${{ secrets.INFRA_GITHUB_TOKEN }}
+          app-id: ${{ secrets.INFRA_GITHUB_APP_ID }}
+          private-key: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+      - name: Authenticate to GCP for PyPI
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.0
+        with:
+          wif_provider: ${{ vars.WIF_PROVIDER }}
+          pypi_sa: ${{ vars.GCP_SA }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+      - name: Install GKE auth plugin
+        if: inputs.install_gke_auth_plugin
+        run: gcloud components install gke-gcloud-auth-plugin --quiet
+      - run: uv sync
+      - name: Resolve Pulumi org
+        id: pulumi_org
+        uses: ExtensibilityAI/github-actions/resolve-pulumi-org@v2.1.0
+        with:
+          pulumi-dir: ${{ matrix.workdir }}
+          stack: ${{ needs.detect-changes.outputs.pulumi_env }}
+          fallback-pulumi-dir: pulumi/platform
+      - name: Pulumi up (app stack)
+        working-directory: ${{ matrix.workdir }}
+        run: |
+          set -euo pipefail
+          uv run pulumi stack select "${{ steps.pulumi_org.outputs.pulumi-org }}/$(grep '^name:' Pulumi.yaml | awk '{print $2}')/${{ needs.detect-changes.outputs.pulumi_env }}" --create
+          uv run pulumi up --yes
