@@ -72,7 +72,7 @@ jobs:
       cancel-in-progress: false
     environment: ${{ matrix.pulumi_env }}
     env:
-      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      PULUMI_BACKEND_URL: ${{ vars.PULUMI_BACKEND_URL }}
       INFRA_CLI_SKIP_GCLOUD_CREDENTIALS: 'true'
     permissions:
       id-token: write

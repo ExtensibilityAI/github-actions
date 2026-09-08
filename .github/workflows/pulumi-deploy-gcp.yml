@@ -111,7 +111,7 @@ jobs:
       group: platform-${{ needs.detect-changes.outputs.pulumi_env }}-${{ github.ref }}
       cancel-in-progress: true
     env:
-      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      PULUMI_BACKEND_URL: ${{ vars.PULUMI_BACKEND_URL }}
     permissions:
       id-token: write
       contents: read
@@ -141,6 +141,12 @@ jobs:
         with:
           pulumi-dir: pulumi/platform
           stack: ${{ needs.detect-changes.outputs.pulumi_env }}
+      - name: Resolve Pulumi secrets provider
+        id: pulumi_sp
+        run: |
+          set -euo pipefail
+          uri=$(uv run infra utils resolve-pulumi-secrets-provider --pulumi-dir pulumi/platform --stack "${{ needs.detect-changes.outputs.pulumi_env }}")
+          echo "secrets-provider=$uri" >> "$GITHUB_OUTPUT"
       - name: Pulumi up (platform)
         working-directory: pulumi/platform
         env:
@@ -148,7 +154,7 @@ jobs:
           GH_TOKEN: ${{ steps.github-token.outputs.token }}
         run: |
           set -euo pipefail
-          uv run pulumi stack select "${{ steps.pulumi_org.outputs.pulumi-org }}/${{ needs.detect-changes.outputs.platform_stack_name }}/${{ needs.detect-changes.outputs.pulumi_env }}" --create
+          uv run pulumi stack select "${{ steps.pulumi_org.outputs.pulumi-org }}/${{ needs.detect-changes.outputs.platform_stack_name }}/${{ needs.detect-changes.outputs.pulumi_env }}" --create --secrets-provider "${{ steps.pulumi_sp.outputs.secrets-provider }}"
           uv run pulumi up --yes
 
   app-stacks:
@@ -168,7 +174,7 @@ jobs:
       group: app-${{ matrix.slug }}-${{ needs.detect-changes.outputs.pulumi_env }}-${{ github.ref }}
       cancel-in-progress: true
     env:
-      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      PULUMI_BACKEND_URL: ${{ vars.PULUMI_BACKEND_URL }}
     permissions:
       id-token: write
       contents: read
@@ -199,6 +205,12 @@ jobs:
           pulumi-dir: ${{ matrix.workdir }}
           stack: ${{ needs.detect-changes.outputs.pulumi_env }}
           fallback-pulumi-dir: pulumi/platform
+      - name: Resolve Pulumi secrets provider
+        id: pulumi_sp
+        run: |
+          set -euo pipefail
+          uri=$(uv run infra utils resolve-pulumi-secrets-provider --pulumi-dir "${{ matrix.workdir }}" --stack "${{ needs.detect-changes.outputs.pulumi_env }}" --fallback-pulumi-dir pulumi/platform)
+          echo "secrets-provider=$uri" >> "$GITHUB_OUTPUT"
       - name: Pulumi up (app stack)
         working-directory: ${{ matrix.workdir }}
         env:
@@ -206,5 +218,5 @@ jobs:
           GH_TOKEN: ${{ steps.github-token.outputs.token }}
         run: |
           set -euo pipefail
-          uv run pulumi stack select "${{ steps.pulumi_org.outputs.pulumi-org }}/$(grep '^name:' Pulumi.yaml | awk '{print $2}')/${{ needs.detect-changes.outputs.pulumi_env }}" --create
+          uv run pulumi stack select "${{ steps.pulumi_org.outputs.pulumi-org }}/$(grep '^name:' Pulumi.yaml | awk '{print $2}')/${{ needs.detect-changes.outputs.pulumi_env }}" --create --secrets-provider "${{ steps.pulumi_sp.outputs.secrets-provider }}"
           uv run pulumi up --yes
