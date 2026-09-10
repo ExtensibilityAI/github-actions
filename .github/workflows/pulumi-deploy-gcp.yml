@@ -31,6 +31,16 @@ on:
         type: string
         required: false
         default: both
+    secrets:
+      INFRA_GITHUB_APP_ID:
+        description: GitHub App ID for minting an installation token
+        required: true
+      INFRA_GITHUB_APP_PRIVATE_KEY:
+        description: GitHub App private key (PEM)
+        required: true
+      INFRA_GITHUB_TOKEN:
+        description: Optional legacy PAT (unused in App mode)
+        required: false
 
 jobs:
   resolve-env:

@@ -15,7 +15,7 @@ Centralize CI/CD patterns (GCP GKE/Helm deploy, package publish, Pulumi) so prod
 | Identity | GCP Workload Identity Federation must require `attribute.repository` (and prefer repo allowlists). See [SECURITY.md](SECURITY.md) for an IAM condition example and caller audit checklist. |
 | Branch filters | Deploy callers must trigger production only from `main` or release tags (`on.push.branches: [main]`). PRs resolve to `staging` via `set-deploy-env`. |
 | Environments | Configure GitHub Environment protection on `prod` (required reviewers). The library `release` workflow uses the `release` environment for tag pushes. |
-| Secrets | No long-lived cloud keys in GitHub secrets for GCP; use WIF. Prefer explicit `secrets:` mappings over `secrets: inherit` when a job needs only GitHub App credentials. Pulumi GCS backends use environment variable `PULUMI_BACKEND_URL`. GitHub App secrets stay in caller environments. |
+| Secrets | No long-lived cloud keys in GitHub secrets for GCP; use WIF. Pulumi callers **must** pass `INFRA_GITHUB_APP_ID` / `INFRA_GITHUB_APP_PRIVATE_KEY` explicitly — `secrets: inherit` only works in the same GitHub organization or enterprise, so customer orgs (e.g. ExtensibilityStore) calling this library get empty App credentials. Pulumi GCS backends use environment variable `PULUMI_BACKEND_URL`. |
 | App-agnostic | Reusable workflows/actions must **never** reference product-specific `vars.*` / `secrets.*` names (e.g. `SCAFFOLDER_*`). Callers may pass opaque `KEY=VALUE` blobs via the `migration_extra_env` **secret** (not a `with:` input — GitHub forbids `secrets.*` in reusable workflow inputs). |
 | Third-party actions | Pin third-party actions to full commit SHAs with a `# vN` comment. |
 
@@ -177,13 +177,18 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-gcp.yml@v2.2.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-gcp.yml@v2.2.1
     with:
       environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
       slug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.slug || '' }}
       target: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || 'both' }}
-    secrets: inherit
+    secrets:
+      INFRA_GITHUB_APP_ID: ${{ secrets.INFRA_GITHUB_APP_ID }}
+      INFRA_GITHUB_APP_PRIVATE_KEY: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
+      INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
 ```
+
+`secrets: inherit` is **not** sufficient when the caller lives in a different GitHub organization than this library (customer infra-core repos). Named `workflow_call` secrets must be passed explicitly.
 
 ### Pulumi (AWS)
 
@@ -193,13 +198,17 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-aws.yml@v2.1.2
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-aws.yml@v2.2.1
     with:
       platform_stack_name: infrastructure-core-aws  # or your repo’s platform project name
       environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
       slug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.slug || '' }}
       target: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || 'both' }}
-    secrets: inherit
+    secrets:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      INFRA_GITHUB_APP_ID: ${{ secrets.INFRA_GITHUB_APP_ID }}
+      INFRA_GITHUB_APP_PRIVATE_KEY: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
+      INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
 ```
 
 ### Pulumi destroy app (GCP)
@@ -210,11 +219,14 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-gcp.yml@v2.2.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-gcp.yml@v2.2.1
     with:
       slug: ${{ github.event.inputs.slug }}
       environments: ${{ github.event.inputs.environments }}
-    secrets: inherit
+    secrets:
+      INFRA_GITHUB_APP_ID: ${{ secrets.INFRA_GITHUB_APP_ID }}
+      INFRA_GITHUB_APP_PRIVATE_KEY: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
+      INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
 ```
 
 ### Pulumi destroy app (AWS)
@@ -225,14 +237,18 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-aws.yml@v2.1.2
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-aws.yml@v2.2.1
     with:
       slug: ${{ github.event.inputs.slug }}
       environments: ${{ github.event.inputs.environments }}
-    secrets: inherit
+    secrets:
+      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      INFRA_GITHUB_APP_ID: ${{ secrets.INFRA_GITHUB_APP_ID }}
+      INFRA_GITHUB_APP_PRIVATE_KEY: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
+      INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
 ```
 
-**Required caller secrets (GCP Pulumi):** `INFRA_GITHUB_APP_ID`, `INFRA_GITHUB_APP_PRIVATE_KEY`. Optional/legacy: `INFRA_GITHUB_TOKEN`. GCP jobs also need GitHub environment variable `PULUMI_BACKEND_URL` (`vars.PULUMI_BACKEND_URL`, written by `infra configure`).
+**Required caller secrets (GCP Pulumi):** `INFRA_GITHUB_APP_ID`, `INFRA_GITHUB_APP_PRIVATE_KEY` as **repository** Actions secrets, passed explicitly on the caller job (not `secrets: inherit`). Optional/legacy: `INFRA_GITHUB_TOKEN`. GCP jobs also need GitHub environment variable `PULUMI_BACKEND_URL` (`vars.PULUMI_BACKEND_URL`, written by `infra configure`).
 
 **Required caller secrets (AWS Pulumi):** `PULUMI_ACCESS_TOKEN`, `INFRA_GITHUB_APP_ID`, `INFRA_GITHUB_APP_PRIVATE_KEY`. Optional/legacy: `INFRA_GITHUB_TOKEN` (org PAT upserted by `infra configure`; unused by App-mode `resolve-github-token`, still accepted as a workflow input for compatibility).
 
