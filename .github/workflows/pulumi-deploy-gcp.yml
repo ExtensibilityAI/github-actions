@@ -144,7 +144,11 @@ jobs:
       - name: Install GKE auth plugin
         if: inputs.install_gke_auth_plugin
         run: gcloud components install gke-gcloud-auth-plugin --quiet
-      - run: uv sync
+      - name: Sync root CLI deps
+        run: uv sync
+      - name: Sync platform stack deps
+        working-directory: pulumi/platform
+        run: uv sync
       - name: Resolve Pulumi org
         id: pulumi_org
         uses: ExtensibilityAI/github-actions/resolve-pulumi-org@v2.1.1
@@ -207,7 +211,11 @@ jobs:
       - name: Install GKE auth plugin
         if: inputs.install_gke_auth_plugin
         run: gcloud components install gke-gcloud-auth-plugin --quiet
-      - run: uv sync
+      - name: Sync root CLI deps
+        run: uv sync
+      - name: Sync app stack deps
+        working-directory: ${{ matrix.workdir }}
+        run: uv sync
       - name: Resolve Pulumi org
         id: pulumi_org
         uses: ExtensibilityAI/github-actions/resolve-pulumi-org@v2.1.1

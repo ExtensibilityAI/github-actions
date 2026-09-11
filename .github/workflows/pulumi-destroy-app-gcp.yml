@@ -111,6 +111,8 @@ jobs:
         if: inputs.install_gke_auth_plugin
         run: gcloud components install gke-gcloud-auth-plugin --quiet
 
+      # Root sync for the infra CLI only. Stack-dir deps are synced inside
+      # `infra app-destroy` via ensure_workdir_deps.
       - run: uv sync
 
       - name: Pulumi destroy (app stack)
