@@ -7,11 +7,10 @@ on:
         description: App slug (required)
         type: string
         required: true
-      environments:
-        description: staging, prod, or both
+      environment:
+        description: staging or prod (one stack per run)
         type: string
-        required: false
-        default: both
+        required: true
       uv_index_prefix:
         type: string
         required: false
@@ -32,17 +31,23 @@ on:
         required: false
 
 jobs:
-  detect-destroy:
+  destroy-app-stack:
     runs-on: ubuntu-latest
-    outputs:
-      destroy_slug: ${{ steps.detect.outputs.destroy_slug }}
-      destroy_matrix: ${{ steps.detect.outputs.destroy_matrix }}
+    concurrency:
+      group: destroy-${{ inputs.slug }}-${{ inputs.environment }}
+      cancel-in-progress: false
+    environment: ${{ inputs.environment }}
+    env:
+      PULUMI_BACKEND_URL: ${{ vars.PULUMI_BACKEND_URL }}
+      INFRA_CLI_SKIP_GCLOUD_CREDENTIALS: 'true'
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Validate destroy inputs
-        id: detect
         env:
           INPUT_SLUG: ${{ inputs.slug }}
-          INPUT_ENVIRONMENTS: ${{ inputs.environments }}
+          INPUT_ENVIRONMENT: ${{ inputs.environment }}
         run: |
           set -euo pipefail
           slug="${INPUT_SLUG:-}"
@@ -51,43 +56,14 @@ jobs:
             echo "::error::destroy requires slug"
             exit 1
           fi
-          envs="${INPUT_ENVIRONMENTS:-both}"
-          entries=()
-          case "$envs" in
-            staging) stacks="staging" ;;
-            prod) stacks="prod" ;;
-            both) stacks="prod staging" ;;
+          case "${INPUT_ENVIRONMENT}" in
+            staging|prod) ;;
             *)
-              echo "::error::environments must be staging, prod, or both"
+              echo "::error::environment must be staging or prod"
               exit 1
               ;;
           esac
-          for s in $stacks; do
-            entries+=("{\"slug\":\"${slug}\",\"pulumi_env\":\"${s}\"}")
-          done
-          matrix=$(printf '%s\n' "${entries[@]}" | jq -s -c '.')
-          echo "destroy_slug=$slug" >> "$GITHUB_OUTPUT"
-          echo "destroy_matrix=$matrix" >> "$GITHUB_OUTPUT"
 
-  destroy-app-stacks:
-    needs: detect-destroy
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        include: ${{ fromJson(needs.detect-destroy.outputs.destroy_matrix) }}
-    concurrency:
-      group: destroy-${{ matrix.slug }}-${{ matrix.pulumi_env }}
-      cancel-in-progress: false
-    environment: ${{ matrix.pulumi_env }}
-    env:
-      PULUMI_BACKEND_URL: ${{ vars.PULUMI_BACKEND_URL }}
-      INFRA_CLI_SKIP_GCLOUD_CREDENTIALS: 'true'
-    permissions:
-      id-token: write
-      contents: read
-    steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Resolve GitHub token
@@ -111,12 +87,44 @@ jobs:
         if: inputs.install_gke_auth_plugin
         run: gcloud components install gke-gcloud-auth-plugin --quiet
 
-      # Root sync for the infra CLI only. Stack-dir deps are synced inside
-      # `infra app-destroy` via ensure_workdir_deps.
-      - run: uv sync
+      - name: Sync root CLI deps
+        run: uv sync
+
+      - name: Resolve stack workdir
+        id: stack
+        env:
+          INPUT_SLUG: ${{ inputs.slug }}
+        run: |
+          set -euo pipefail
+          workdir=$(uv run infra utils resolve-stack-workdir --slug "${INPUT_SLUG}")
+          echo "workdir=$workdir" >> "$GITHUB_OUTPUT"
+
+      - name: Sync app stack deps
+        working-directory: ${{ steps.stack.outputs.workdir }}
+        run: uv sync
+
+      - name: Resolve Pulumi org
+        id: pulumi_org
+        uses: ExtensibilityAI/github-actions/resolve-pulumi-org@v2.1.1
+        with:
+          pulumi-dir: ${{ steps.stack.outputs.workdir }}
+          stack: ${{ inputs.environment }}
+          fallback-pulumi-dir: pulumi/platform
 
       - name: Pulumi destroy (app stack)
+        working-directory: ${{ steps.stack.outputs.workdir }}
         env:
           GITHUB_ACCESS_TOKEN: ${{ steps.github-token.outputs.token }}
           GH_TOKEN: ${{ steps.github-token.outputs.token }}
-        run: uv run infra app-destroy "${{ matrix.slug }}" --stack "${{ matrix.pulumi_env }}"
+          PULUMI_ENV: ${{ inputs.environment }}
+          PULUMI_ORG: ${{ steps.pulumi_org.outputs.pulumi-org }}
+        run: |
+          set -euo pipefail
+          project=$(grep '^name:' Pulumi.yaml | awk '{print $2}')
+          fqn="${PULUMI_ORG}/${project}/${PULUMI_ENV}"
+          if ! uv run pulumi stack select "${fqn}"; then
+            echo "Stack ${fqn} not found; skipping destroy."
+            exit 0
+          fi
+          uv run pulumi destroy --yes --run-program
+          uv run pulumi stack rm --yes
