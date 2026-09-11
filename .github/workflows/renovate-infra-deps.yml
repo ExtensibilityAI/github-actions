@@ -1,0 +1,89 @@
+# Reusable workflow: self-hosted Renovate for infra-core dependency updates.
+# Policy (schedule, groupName, packageRules) lives in each repo's renovate.json.
+# Auth: Infra GitHub App via resolve-github-token (same as Pulumi deploy); falls back to github.token.
+name: Renovate infra deps
+
+on:
+  workflow_call:
+    inputs:
+      cloud:
+        description: gcp or aws (selects registry auth)
+        type: string
+        required: true
+      uv_index_prefix:
+        type: string
+        required: false
+        default: EXTENSIBILITY_AI
+      configuration_file:
+        description: Path to Renovate config in the caller repo
+        type: string
+        required: false
+        default: renovate.json
+    secrets:
+      INFRA_GITHUB_TOKEN:
+        required: false
+      INFRA_GITHUB_APP_ID:
+        required: false
+      INFRA_GITHUB_APP_PRIVATE_KEY:
+        required: false
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Detect GitHub App credentials
+        id: app-creds
+        env:
+          APP_ID: ${{ secrets.INFRA_GITHUB_APP_ID }}
+          APP_KEY: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APP_ID}" ] && [ -n "${APP_KEY}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve GitHub App token
+        id: github-token
+        if: steps.app-creds.outputs.present == 'true'
+        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.2
+        with:
+          infra-github-token: ${{ secrets.INFRA_GITHUB_TOKEN }}
+          app-id: ${{ secrets.INFRA_GITHUB_APP_ID }}
+          private-key: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
+
+      - name: Authenticate to GCP for PyPI
+        if: inputs.cloud == 'gcp'
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.1.1
+        with:
+          wif_provider: ${{ vars.WIF_PROVIDER }}
+          pypi_sa: ${{ vars.GCP_SA }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+
+      - name: Setup CodeArtifact auth
+        if: inputs.cloud == 'aws'
+        uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.1.1
+        with:
+          aws_role_arn: ${{ vars.AWS_ROLE_ARN }}
+          aws_region: ${{ vars.AWS_REGION }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+          codeartifact_domain: ${{ vars.CODEARTIFACT_DOMAIN }}
+          codeartifact_repo: ${{ vars.CODEARTIFACT_REPO || 'pypi' }}
+
+      - name: Self-hosted Renovate
+        uses: renovatebot/github-action@v46.2.2
+        with:
+          configurationFile: ${{ inputs.configuration_file }}
+          token: ${{ steps.github-token.outputs.token || github.token }}
+          env-regex: "^(?:RENOVATE_\\w+|LOG_LEVEL|GITHUB_COM_TOKEN|NODE_OPTIONS|NO_COLOR|(?:HTTPS?|NO)_PROXY|(?:https?|no)_proxy|UV_INDEX_.*|AWS_.*)$"
+        env:
+          LOG_LEVEL: info
+          RENOVATE_PLATFORM: github
+          RENOVATE_REPOSITORIES: ${{ github.repository }}

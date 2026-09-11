@@ -24,7 +24,8 @@ Centralize CI/CD patterns (GCP GKE/Helm deploy, package publish, Pulumi) so prod
 - **GCP GKE / Helm**: JSON image matrix build & push, optional Cloud SQL migrations, kubectl or Helm rollout
 - **Python packages**: CI (blocking ruff + pytest) and publish to Artifact Registry PyPI
 - **Python backends**: CI with Postgres; light import CI; compose-config CI
-- **Pulumi**: path-filtered platform + app stack deploys (GCP and AWS), app-stack destroy
+- **Pulumi**: path-filtered platform + app stack deploys (GCP and AWS), app-stack destroy; per-stack `uv sync` in stack workdirs plus root CLI sync
+- **Renovate**: self-hosted infra dependency updates (`renovate-infra-deps.yml`) with caller-owned `renovate.json`; auth via Infra GitHub App (`INFRA_GITHUB_APP_*`), same as Pulumi deploy — no dedicated `RENOVATE_TOKEN`
 
 ## Versioning
 
@@ -58,7 +59,7 @@ Release via Actions → **Release** → `workflow_dispatch` with version input (
 | `aws-actions/configure-aws-credentials` | `# v4` → `7474bc4690e29a8392af63c5b98e7449536d5c3a` |
 
 Cloud SQL Auth Proxy: `v2.14.2` (checksum pinned in `install-cloud-sql-proxy`).  
-actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`).
+actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`). Local mirror: `pre-commit install` then `pre-commit run --all-files` (see `.pre-commit-config.yaml`).
 
 ## Composite actions
 
@@ -99,10 +100,11 @@ actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`).
 | `ci-python-light.yml` | Lightweight uv sync / import or pytest (no private index) |
 | `ci-compose-config.yml` | bash -n scripts + `docker compose config` |
 | `deploy-gke-app.yml` | Image matrix build, optional migrations/SDK, kubectl or Helm |
-| `pulumi-deploy-gcp.yml` | GCP path-filtered Pulumi: platform stack, then app stacks |
-| `pulumi-deploy-aws.yml` | AWS path-filtered Pulumi: platform stack, then app stacks |
+| `pulumi-deploy-gcp.yml` | GCP path-filtered Pulumi: platform stack, then app stacks (root CLI `uv sync` + per-stack `uv sync`) |
+| `pulumi-deploy-aws.yml` | AWS path-filtered Pulumi: platform stack, then app stacks (same dual-sync pattern) |
 | `pulumi-destroy-app-gcp.yml` | Destroy per-slug GCP app stacks |
 | `pulumi-destroy-app-aws.yml` | Destroy per-slug AWS app stacks |
+| `renovate-infra-deps.yml` | Self-hosted Renovate with GAR/CodeArtifact auth; uses Infra GitHub App token (same as deploy); policy from caller `renovate.json` |
 
 ## Caller examples
 
@@ -205,7 +207,6 @@ jobs:
       slug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.slug || '' }}
       target: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || 'both' }}
     secrets:
-      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
       INFRA_GITHUB_APP_ID: ${{ secrets.INFRA_GITHUB_APP_ID }}
       INFRA_GITHUB_APP_PRIVATE_KEY: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
       INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
@@ -242,7 +243,6 @@ jobs:
       slug: ${{ github.event.inputs.slug }}
       environments: ${{ github.event.inputs.environments }}
     secrets:
-      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
       INFRA_GITHUB_APP_ID: ${{ secrets.INFRA_GITHUB_APP_ID }}
       INFRA_GITHUB_APP_PRIVATE_KEY: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
       INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
@@ -250,10 +250,10 @@ jobs:
 
 **Required caller secrets (GCP Pulumi):** `INFRA_GITHUB_APP_ID`, `INFRA_GITHUB_APP_PRIVATE_KEY` as **repository** Actions secrets, passed explicitly on the caller job (not `secrets: inherit`). Optional/legacy: `INFRA_GITHUB_TOKEN`. GCP jobs also need GitHub environment variable `PULUMI_BACKEND_URL` (`vars.PULUMI_BACKEND_URL`, written by `infra configure`).
 
-**Required caller secrets (AWS Pulumi):** `PULUMI_ACCESS_TOKEN`, `INFRA_GITHUB_APP_ID`, `INFRA_GITHUB_APP_PRIVATE_KEY`. Optional/legacy: `INFRA_GITHUB_TOKEN` (org PAT upserted by `infra configure`; unused by App-mode `resolve-github-token`, still accepted as a workflow input for compatibility).
+**Required caller secrets (AWS Pulumi):** `INFRA_GITHUB_APP_ID`, `INFRA_GITHUB_APP_PRIVATE_KEY`. Optional/legacy: `INFRA_GITHUB_TOKEN`. AWS jobs need GitHub environment variable `PULUMI_BACKEND_URL` (S3 DIY backend, written by `infra configure`). No `PULUMI_ACCESS_TOKEN`.
 
 **GCP vars:** `WIF_PROVIDER`, `GCP_SA`, `GCP_PROJECT_ID`, `GCP_REGION`, `PULUMI_BACKEND_URL` (as used by your stacks)
 
-**AWS vars:** `AWS_ROLE_ARN`, `AWS_REGION`, `CODEARTIFACT_DOMAIN` (for CodeArtifact auth)
+**AWS vars:** `AWS_ROLE_ARN`, `AWS_REGION`, `PULUMI_BACKEND_URL`, `CODEARTIFACT_DOMAIN` (for CodeArtifact auth); optional `EKS_CLUSTER_NAME` for kubeconfig updates
 
 Composite actions that nest other composites **must** use fully-qualified `ExtensibilityAI/github-actions/<name>@vX.Y.Z` pins. Relative `./` paths resolve in the *caller* workspace and break cross-repo.

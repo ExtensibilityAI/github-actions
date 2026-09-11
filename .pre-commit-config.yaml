@@ -1,0 +1,27 @@
+# Pre-commit hooks mirroring .github/workflows/actionlint.yml
+#
+# Setup (once per clone):
+#   uv tool install pre-commit   # or: pipx install pre-commit
+#   pre-commit install
+#
+# Run manually (all files):
+#   pre-commit run --all-files
+
+minimum_pre_commit_version: "3.5.0"
+
+repos:
+  - repo: local
+    hooks:
+      - id: actionlint
+        name: actionlint (workflows)
+        entry: scripts/pre-commit/actionlint.sh
+        language: script
+        pass_filenames: false
+        files: \.(yml|yaml)$
+
+      - id: validate-composites
+        name: validate composite action metadata
+        entry: scripts/pre-commit/validate-composites.sh
+        language: script
+        pass_filenames: false
+        files: (^|/)?action\.yml$

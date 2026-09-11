@@ -17,9 +17,6 @@ on:
         required: false
         default: EXTENSIBILITY_AI
     secrets:
-      PULUMI_ACCESS_TOKEN:
-        description: Pulumi Cloud access token
-        required: true
       INFRA_GITHUB_APP_ID:
         description: GitHub App ID for minting an installation token
         required: true
@@ -81,7 +78,7 @@ jobs:
       cancel-in-progress: false
     environment: ${{ matrix.pulumi_env }}
     env:
-      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+      PULUMI_BACKEND_URL: ${{ vars.PULUMI_BACKEND_URL }}
     permissions:
       id-token: write
       contents: read
@@ -104,6 +101,15 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
+      - name: Setup CodeArtifact auth
+        uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.1.1
+        with:
+          aws_role_arn: ${{ vars.AWS_ROLE_ARN }}
+          aws_region: ${{ vars.AWS_REGION }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+
+      # Root sync for the infra CLI only. Stack-dir deps are synced inside
+      # `infra app-destroy` via ensure_workdir_deps.
       - run: uv sync
 
       - name: Pulumi destroy (app stack)
