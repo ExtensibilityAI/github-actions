@@ -59,7 +59,7 @@ Release via Actions → **Release** → `workflow_dispatch` with version input (
 | `aws-actions/configure-aws-credentials` | `# v4` → `7474bc4690e29a8392af63c5b98e7449536d5c3a` |
 
 Cloud SQL Auth Proxy: `v2.14.2` (checksum pinned in `install-cloud-sql-proxy`).  
-actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`).
+actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`). Local mirror: `pre-commit install` then `pre-commit run --all-files` (see `.pre-commit-config.yaml`).
 
 ## Composite actions
 

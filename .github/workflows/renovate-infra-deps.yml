@@ -37,9 +37,22 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Detect GitHub App credentials
+        id: app-creds
+        env:
+          APP_ID: ${{ secrets.INFRA_GITHUB_APP_ID }}
+          APP_KEY: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APP_ID}" ] && [ -n "${APP_KEY}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Resolve GitHub App token
         id: github-token
-        if: ${{ secrets.INFRA_GITHUB_APP_ID != '' && secrets.INFRA_GITHUB_APP_PRIVATE_KEY != '' }}
+        if: steps.app-creds.outputs.present == 'true'
         uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.2
         with:
           infra-github-token: ${{ secrets.INFRA_GITHUB_TOKEN }}
