@@ -111,20 +111,17 @@ jobs:
           stack: ${{ inputs.environment }}
           fallback-pulumi-dir: pulumi/platform
 
-      - name: Pulumi destroy (app stack)
-        working-directory: ${{ steps.stack.outputs.workdir }}
+      - name: Setup Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+
+      - name: Destroy app (helm uninstall + pulumi destroy)
         env:
           GITHUB_ACCESS_TOKEN: ${{ steps.github-token.outputs.token }}
           GH_TOKEN: ${{ steps.github-token.outputs.token }}
           PULUMI_ENV: ${{ inputs.environment }}
           PULUMI_ORG: ${{ steps.pulumi_org.outputs.pulumi-org }}
+          INPUT_SLUG: ${{ inputs.slug }}
         run: |
           set -euo pipefail
-          project=$(grep '^name:' Pulumi.yaml | awk '{print $2}')
-          fqn="${PULUMI_ORG}/${project}/${PULUMI_ENV}"
-          if ! uv run pulumi stack select "${fqn}"; then
-            echo "Stack ${fqn} not found; skipping destroy."
-            exit 0
-          fi
-          uv run pulumi destroy --yes --run-program
-          uv run pulumi stack rm --yes
+          # infra app-destroy uninstalls external Helm releases then destroys the stack.
+          uv run infra app-destroy "${INPUT_SLUG}" --stack "${PULUMI_ENV}"

@@ -1,4 +1,4 @@
-name: Deploy GKE app
+name: Deploy EKS app
 
 on:
   workflow_call:
@@ -49,22 +49,23 @@ on:
         type: boolean
         required: false
         default: false
-      db_secret_name_prefix:
+      migration_image_name:
+        description: >
+          Image name under docker-images/ for the migrate Job (defaults to first
+          matrix image name). Usually the api/backend image.
         type: string
         required: false
         default: ''
-      db_user:
+      migration_service_account:
+        description: K8s ServiceAccount for the migrate Job
         type: string
         required: false
-        default: ''
-      db_name:
+        default: api
+      ecr_repository_prefix:
+        description: ECR repository prefix (platform dockerRepoName)
         type: string
         required: false
-        default: ''
-      instance_name_prefix:
-        type: string
-        required: false
-        default: platform-db
+        default: docker-images
 
       publish_sdk:
         type: boolean
@@ -142,18 +143,17 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: ExtensibilityAI/github-actions/docker-build-push@v2.1.1
+      - uses: ExtensibilityAI/github-actions/docker-build-push-aws@v2.4.0
         id: build
         with:
           image_name: ${{ matrix.name }}
           context: ${{ matrix.context }}
           dockerfile: ${{ matrix.dockerfile }}
-          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
-          gcp_region: ${{ vars.GCP_REGION || 'us-central1' }}
-          wif_provider: ${{ vars.WIF_PROVIDER }}
-          gcp_sa: ${{ vars.GCP_SA }}
+          aws_role_arn: ${{ vars.AWS_ROLE_ARN }}
+          aws_region: ${{ vars.AWS_REGION }}
+          aws_account_id: ${{ vars.AWS_ACCOUNT_ID }}
+          ecr_repository_prefix: ${{ inputs.ecr_repository_prefix }}
           needs_pypi_auth: ${{ matrix.needs_pypi_auth }}
-          pypi_sa: ${{ vars.PYPI_SA }}
           uv_index_prefix: ${{ inputs.uv_index_prefix }}
           build_secret_env: ${{ matrix.build_secret_env }}
 
@@ -223,15 +223,16 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: ExtensibilityAI/github-actions/publish-python-sdk@v2.1.1
+      - uses: ExtensibilityAI/github-actions/publish-python-sdk-aws@v2.4.0
         with:
           deploy_env: ${{ needs.set-env.outputs.env }}
           working_directory: ${{ inputs.sdk_directory }}
           uv_index_prefix: ${{ inputs.uv_index_prefix }}
-          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
-          gcp_region: ${{ vars.GCP_REGION || 'us-central1' }}
-          wif_provider: ${{ vars.WIF_PROVIDER }}
-          pypi_sa: ${{ vars.PYPI_SA }}
+          aws_role_arn: ${{ vars.AWS_ROLE_ARN }}
+          aws_region: ${{ vars.AWS_REGION }}
+          aws_account_id: ${{ vars.AWS_ACCOUNT_ID }}
+          codeartifact_domain: ${{ vars.CODEARTIFACT_DOMAIN }}
+          codeartifact_repo: ${{ vars.CODEARTIFACT_REPOSITORY || 'pypi' }}
 
   migrations:
     needs: [set-env, build-summary]
@@ -247,19 +248,34 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: ExtensibilityAI/github-actions/cloud-sql-migrate@v2.1.1
+
+      - name: Resolve migration image
+        id: image
+        env:
+          ACCOUNT: ${{ vars.AWS_ACCOUNT_ID }}
+          REGION: ${{ vars.AWS_REGION }}
+          PREFIX: ${{ inputs.ecr_repository_prefix }}
+          NAME: ${{ inputs.migration_image_name || needs.set-env.outputs.first_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ACCOUNT:-}" ] || [ -z "${REGION:-}" ] || [ -z "${NAME:-}" ]; then
+            echo "::error::AWS_ACCOUNT_ID, AWS_REGION, and migration image name are required"
+            exit 1
+          fi
+          REF="${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/${PREFIX}/${NAME}:${SHA}"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - uses: ExtensibilityAI/github-actions/rds-migrate@v2.4.0
         with:
-          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
-          gcp_region: ${{ vars.GCP_REGION || 'us-central1' }}
-          wif_provider: ${{ vars.WIF_PROVIDER }}
-          gcp_sa: ${{ vars.GCP_SA }}
-          pypi_sa: ${{ vars.PYPI_SA }}
-          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+          aws_role_arn: ${{ vars.AWS_ROLE_ARN }}
+          aws_region: ${{ vars.AWS_REGION }}
           deploy_env: ${{ needs.set-env.outputs.env }}
-          db_secret_name_prefix: ${{ inputs.db_secret_name_prefix }}
-          db_user: ${{ inputs.db_user }}
-          db_name: ${{ inputs.db_name }}
-          instance_name_prefix: ${{ inputs.instance_name_prefix }}
+          eks_cluster_name: ${{ vars.EKS_CLUSTER_NAME }}
+          eks_region: ${{ vars.EKS_REGION || vars.AWS_REGION }}
+          k8s_namespace: ${{ vars.K8S_NAMESPACE }}
+          migration_image: ${{ steps.image.outputs.ref }}
+          service_account: ${{ inputs.migration_service_account }}
           extra_env: ${{ secrets.migration_extra_env }}
 
   deploy:
@@ -274,26 +290,25 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    env:
-      REGION: ${{ vars.GCP_REGION || 'us-central1' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Authenticate to GCP (WIF)
-        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
-          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_SA }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
-
-      - name: Get GKE credentials
-        uses: google-github-actions/get-gke-credentials@64bc7249bbcf78056bb92f14d3cedc2da193946c # v2
-        with:
-          cluster_name: ${{ vars.GKE_CLUSTER }}
-          location: ${{ vars.GKE_REGION }}
-          project_id: ${{ vars.GCP_PROJECT_ID }}
+      - name: Update kubeconfig for EKS
+        run: |
+          set -euo pipefail
+          if [ -z "${{ vars.EKS_CLUSTER_NAME }}" ]; then
+            echo "::error::EKS_CLUSTER_NAME environment variable is required"
+            exit 1
+          fi
+          aws eks update-kubeconfig \
+            --name "${{ vars.EKS_CLUSTER_NAME }}" \
+            --region "${{ vars.EKS_REGION || vars.AWS_REGION }}"
 
       - name: Helm rollout
         uses: ExtensibilityAI/github-actions/helm-rollout@v2.4.0
@@ -306,10 +321,10 @@ jobs:
           helm_repo_name: ${{ inputs.helm_repo_name }}
           helm_repo_url: ${{ inputs.helm_repo_url }}
           helm_release_var: ${{ vars.HELM_RELEASE }}
-          cloud: gcp
+          cloud: aws
           image_registry: ${{ vars.IMAGE_REGISTRY }}
-          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
-          gcp_region: ${{ vars.GCP_REGION || 'us-central1' }}
+          aws_account_id: ${{ vars.AWS_ACCOUNT_ID }}
+          aws_region: ${{ vars.AWS_REGION }}
           k8s_namespace: ${{ vars.K8S_NAMESPACE }}
           wait: ${{ inputs.helm_wait }}
         env:

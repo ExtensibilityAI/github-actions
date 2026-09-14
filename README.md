@@ -4,7 +4,7 @@ Shared composite actions and reusable workflows for ExtensibilityAI platform app
 
 ## Purpose
 
-Centralize CI/CD patterns (GCP GKE/Helm deploy, package publish, Pulumi) so product repos stay thin callers that pin this library by version tag.
+Centralize CI/CD patterns (GCP GKE/Helm and AWS EKS/Helm deploy, package publish, Pulumi) so product repos stay thin callers that pin this library by version tag.
 
 ## Threat model
 
@@ -21,7 +21,8 @@ Centralize CI/CD patterns (GCP GKE/Helm deploy, package publish, Pulumi) so prod
 
 ## Supported surface
 
-- **GCP GKE / Helm**: JSON image matrix build & push, optional Cloud SQL migrations, kubectl or Helm rollout
+- **GCP GKE / Helm**: JSON image matrix build & push, optional Cloud SQL migrations, Helm rollout
+- **AWS EKS / Helm**: JSON image matrix build & push to ECR, optional RDS migrate Job + CodeArtifact SDK publish, Helm rollout (`deploy-eks-app.yml`)
 - **Python packages**: CI (blocking ruff + pytest) and publish to Artifact Registry PyPI
 - **Python backends**: CI with Postgres; light import CI; compose-config CI
 - **Pulumi**: path-filtered platform + app stack deploys (GCP and AWS), app-stack destroy; per-stack `uv sync` in stack workdirs plus root CLI sync
@@ -57,6 +58,7 @@ Release via Actions → **Release** → `workflow_dispatch` with version input (
 | `azure/setup-helm` | `# v4` → `1a275c3b69536ee54be43f2070a358922e12c8d4` |
 | `actions/create-github-app-token` | `# v1` → `d72941d797fd3113feb6b93fd0dec494b13a2547` |
 | `aws-actions/configure-aws-credentials` | `# v4` → `7474bc4690e29a8392af63c5b98e7449536d5c3a` |
+| `aws-actions/amazon-ecr-login` | `# v2` → `03f1aad4c6c7ffd436567f42f9384779290529bd` |
 
 Cloud SQL Auth Proxy: `v2.14.2` (checksum pinned in `install-cloud-sql-proxy`).  
 actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`). Local mirror: `pre-commit install` then `pre-commit run --all-files` (see `.pre-commit-config.yaml`).
@@ -74,10 +76,12 @@ actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`). Lo
 | `parse-image-matrix` | Normalize JSON image list for deploy matrix |
 | `install-cloud-sql-proxy` | Download + SHA256 verify proxy to `/usr/local/bin` |
 | `set-deploy-env` | Resolve `env` / `stack`: PR→staging, push/tag→prod, dispatch→input |
-| `docker-build-push` | WIF build/push with `:latest` cache and change detection |
-| `cloud-sql-migrate` | Secret Manager + proxy + alembic (opaque `extra_env` allowed) |
-| `publish-python-sdk` | Version rewrite + twine for an SDK package directory |
-| `kubectl-rollout` | SHA-based kubectl set image for changed images |
+| `docker-build-push` | WIF build/push with `:latest` cache and change detection (GAR) |
+| `docker-build-push-aws` | OIDC + ECR login, build/push with `:latest` cache and change detection |
+| `cloud-sql-migrate` | Secret Manager + Cloud SQL Auth Proxy + alembic (opaque `extra_env` allowed) |
+| `rds-migrate` | EKS Job alembic against VPC-private RDS (ConfigMap `app-env` + Secret `db`) |
+| `publish-python-sdk` | Version rewrite + twine to Artifact Registry PyPI |
+| `publish-python-sdk-aws` | Version rewrite + twine to CodeArtifact PyPI |
 | `helm-rollout` | SHA-based helm upgrade --reuse-values |
 
 ### Pulumi GitHub token
@@ -99,11 +103,12 @@ actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`). Lo
 | `ci-python-backend.yml` | Backend + Postgres, blocking ruff, pytest; optional frontend job |
 | `ci-python-light.yml` | Lightweight uv sync / import or pytest (no private index) |
 | `ci-compose-config.yml` | bash -n scripts + `docker compose config` |
-| `deploy-gke-app.yml` | Image matrix build, optional migrations/SDK, kubectl or Helm |
+| `deploy-gke-app.yml` | Image matrix build, optional migrations/SDK, Helm rollout (GCP; Helm-only) |
+| `deploy-eks-app.yml` | Image matrix build to ECR, optional RDS migrate Job / CodeArtifact SDK, Helm rollout (AWS; Helm-only) |
 | `pulumi-deploy-gcp.yml` | GCP path-filtered Pulumi: platform stack, then app stacks (root CLI `uv sync` + per-stack `uv sync`) |
 | `pulumi-deploy-aws.yml` | AWS path-filtered Pulumi: platform stack, then app stacks (same dual-sync pattern) |
-| `pulumi-destroy-app-gcp.yml` | Destroy one GCP app stack (`slug` + `environment`) via CLI `pulumi destroy` |
-| `pulumi-destroy-app-aws.yml` | Destroy one AWS app stack (`slug` + `environment`) via CLI `pulumi destroy` |
+| `pulumi-destroy-app-gcp.yml` | Destroy one GCP app stack (`slug` + `environment`) via `infra app-destroy` (helm uninstall then `pulumi destroy`) |
+| `pulumi-destroy-app-aws.yml` | Destroy one AWS app stack (`slug` + `environment`) via `infra app-destroy` (helm uninstall then `pulumi destroy`) |
 | `renovate-infra-deps.yml` | Self-hosted Renovate with GAR/CodeArtifact auth; uses Infra GitHub App token (same as deploy); policy from caller `renovate.json` |
 
 ## Caller examples
@@ -143,12 +148,13 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/deploy-gke-app.yml@v2.1.2
+    uses: ExtensibilityAI/github-actions/.github/workflows/deploy-gke-app.yml@v2.4.0
     with:
       images: |
         [{"name":"lims-api","dockerfile":"backend/Dockerfile","needs_pypi_auth":true,"build_secret_env":"UV_INDEX_EXTENSIBILITY_AI_PYPI_PASSWORD","role":"api"},
          {"name":"lims-frontend","dockerfile":"frontend/Dockerfile","context":"frontend","role":"frontend"}]
-      # role is a Kubernetes DNS label matching gcp.services[].name (api, frontend, or a custom name).
+      # role is a Kubernetes DNS label matching cloud.services[].name (api, frontend, or a custom name).
+      helm_chart: ./chart
       run_migrations: true
       db_secret_name_prefix: lims-db-password
       db_user: lims
@@ -158,6 +164,7 @@ jobs:
     secrets: inherit
 ```
 
+Deploy is **Helm-only** (no `deploy_method` / kubectl). Pass `helm_chart` (local `./chart` or upstream).
 Product-specific migrate env (scaffolder only) belongs in the **caller** as a
 `secrets:` mapping (cannot use `secrets: inherit` in the same job when passing an
 explicit secret). Vars may be interpolated into the secret value:
@@ -170,6 +177,32 @@ explicit secret). Vars may be interpolated into the secret value:
 ```
 
 Callers that do not need extra migrate env keep `secrets: inherit`.
+
+### EKS app deploy
+
+```yaml
+jobs:
+  deploy:
+    permissions:
+      id-token: write
+      contents: read
+    uses: ExtensibilityAI/github-actions/.github/workflows/deploy-eks-app.yml@v2.4.0
+    with:
+      images: |
+        [{"name":"lims-api","dockerfile":"backend/Dockerfile","needs_pypi_auth":true,"build_secret_env":"UV_INDEX_ACCOUNT_PYPI_PASSWORD","role":"api"}]
+      helm_chart: ./chart
+      run_migrations: true
+      publish_sdk: false
+      uv_index_prefix: ACCOUNT
+      dispatch_environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
+    secrets: inherit
+```
+
+**RDS migrations** run as an EKS Job (`rds-migrate`) using the just-built image, ConfigMap `app-env`, and Secret `db` (created by the app Pulumi stack). GitHub-hosted runners cannot reach VPC-private RDS directly.
+
+**SDK publish** uses `publish-python-sdk-aws` → CodeArtifact. Ensure `infra-gh` (or `codeartifact.publisherPrincipals`) can `PublishPackageVersion`.
+
+Requires environment vars from the app/platform Pulumi sync: `AWS_ROLE_ARN`, `AWS_REGION`, `AWS_ACCOUNT_ID`, `EKS_CLUSTER_NAME`, `K8S_NAMESPACE`, `HELM_RELEASE` (optional `IMAGE_REGISTRY`, `EKS_REGION`, `CODEARTIFACT_DOMAIN`, `CODEARTIFACT_REPOSITORY`).
 
 ### Pulumi (GCP)
 
@@ -256,6 +289,6 @@ jobs:
 
 **GCP vars:** `WIF_PROVIDER`, `GCP_SA`, `GCP_PROJECT_ID`, `GCP_REGION`, `PULUMI_BACKEND_URL` (as used by your stacks)
 
-**AWS vars:** `AWS_ROLE_ARN`, `AWS_REGION`, `PULUMI_BACKEND_URL`, `CODEARTIFACT_DOMAIN` (for CodeArtifact auth); optional `EKS_CLUSTER_NAME` for kubeconfig updates
+**AWS vars:** `AWS_ROLE_ARN`, `AWS_REGION`, `AWS_ACCOUNT_ID`, `PULUMI_BACKEND_URL`, `CODEARTIFACT_DOMAIN` (and optional `CODEARTIFACT_REPOSITORY`); for EKS deploy/destroy also `EKS_CLUSTER_NAME`, `K8S_NAMESPACE`, `HELM_RELEASE` (optional `EKS_REGION`, `IMAGE_REGISTRY`)
 
 Composite actions that nest other composites **must** use fully-qualified `ExtensibilityAI/github-actions/<name>@vX.Y.Z` pins. Relative `./` paths resolve in the *caller* workspace and break cross-repo.
