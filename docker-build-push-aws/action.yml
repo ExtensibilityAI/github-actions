@@ -63,7 +63,7 @@ runs:
 
     - name: Setup CodeArtifact auth
       if: inputs.needs_pypi_auth == 'true'
-      uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.1.1
+      uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.4.0
       with:
         aws_role_arn: ${{ inputs.aws_role_arn }}
         aws_region: ${{ inputs.aws_region }}

@@ -106,12 +106,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ExtensibilityAI/github-actions/parse-image-matrix@v2.1.1
+      - uses: ExtensibilityAI/github-actions/parse-image-matrix@v2.4.0
         id: images
         with:
           images: ${{ inputs.images }}
 
-      - uses: ExtensibilityAI/github-actions/detect-path-changes@v2.1.1
+      - uses: ExtensibilityAI/github-actions/detect-path-changes@v2.4.0
         id: detect
         if: inputs.publish_sdk
         with:
@@ -123,7 +123,7 @@ jobs:
         id: detect-skip
         run: echo "changed=false" >> "$GITHUB_OUTPUT"
 
-      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.1.1
+      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.4.0
         id: env
         with:
           mode: app
@@ -266,7 +266,7 @@ jobs:
           REF="${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/${PREFIX}/${NAME}:${SHA}"
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
-      - uses: ExtensibilityAI/github-actions/rds-migrate@v2.4.0
+      - uses: ExtensibilityAI/github-actions/rds-migrate@v2.5.0
         with:
           aws_role_arn: ${{ vars.AWS_ROLE_ARN }}
           aws_region: ${{ vars.AWS_REGION }}

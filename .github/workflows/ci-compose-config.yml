@@ -22,6 +22,10 @@ jobs:
             fi
           done
           echo "bash -n OK"
+      - name: Unit test migration_extra_env
+        run: |
+          set -euo pipefail
+          python3 scripts/test_migration_extra_env.py
       - name: docker compose config
         run: |
           set -euo pipefail

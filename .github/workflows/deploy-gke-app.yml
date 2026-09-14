@@ -105,12 +105,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ExtensibilityAI/github-actions/parse-image-matrix@v2.1.1
+      - uses: ExtensibilityAI/github-actions/parse-image-matrix@v2.4.0
         id: images
         with:
           images: ${{ inputs.images }}
 
-      - uses: ExtensibilityAI/github-actions/detect-path-changes@v2.1.1
+      - uses: ExtensibilityAI/github-actions/detect-path-changes@v2.4.0
         id: detect
         if: inputs.publish_sdk
         with:
@@ -122,7 +122,7 @@ jobs:
         id: detect-skip
         run: echo "changed=false" >> "$GITHUB_OUTPUT"
 
-      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.1.1
+      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.4.0
         id: env
         with:
           mode: app
@@ -142,7 +142,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: ExtensibilityAI/github-actions/docker-build-push@v2.1.1
+      - uses: ExtensibilityAI/github-actions/docker-build-push@v2.4.0
         id: build
         with:
           image_name: ${{ matrix.name }}
@@ -223,7 +223,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: ExtensibilityAI/github-actions/publish-python-sdk@v2.1.1
+      - uses: ExtensibilityAI/github-actions/publish-python-sdk@v2.4.0
         with:
           deploy_env: ${{ needs.set-env.outputs.env }}
           working_directory: ${{ inputs.sdk_directory }}
@@ -247,7 +247,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: ExtensibilityAI/github-actions/cloud-sql-migrate@v2.1.1
+      - uses: ExtensibilityAI/github-actions/cloud-sql-migrate@v2.5.0
         with:
           gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
           gcp_region: ${{ vars.GCP_REGION || 'us-central1' }}

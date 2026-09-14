@@ -45,7 +45,9 @@ inputs:
     required: false
     default: password
   extra_env:
-    description: Newline-delimited KEY=VALUE (literal env on the Job)
+    description: >
+      Newline-delimited KEY=VALUE (literal env on the Job). Multiline values
+      (e.g. PEMs) continue until the next KEY= line.
     required: false
     default: ''
   job_timeout_seconds:
@@ -80,40 +82,13 @@ runs:
         EXTRA_ENV: ${{ inputs.extra_env }}
       run: |
         set -euo pipefail
-        OUT="${RUNNER_TEMP}/migrate-extra-env.txt"
-        : > "$OUT"
+        OUT="${RUNNER_TEMP}/migrate-extra-env.json"
         if [ -z "${EXTRA_ENV:-}" ]; then
+          echo '[]' > "$OUT"
           echo "extra_env_file=$OUT" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        python3 <<'PY'
-        import os, re, sys
-
-        key_re = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
-        extra = os.environ.get("EXTRA_ENV", "")
-        out = os.path.join(os.environ["RUNNER_TEMP"], "migrate-extra-env.txt")
-        lines_out = []
-        for lineno, raw in enumerate(extra.splitlines(), start=1):
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" not in line:
-                print(f"::error::Invalid migration_extra_env at line {lineno}: missing '='", file=sys.stderr)
-                sys.exit(1)
-            key, value = line.split("=", 1)
-            if not key_re.match(key):
-                print(f"::error::Invalid migration_extra_env key at line {lineno}", file=sys.stderr)
-                sys.exit(1)
-            if any(ch in value for ch in "\n\r"):
-                print(f"::error::Invalid migration_extra_env value at line {lineno}: embedded newline", file=sys.stderr)
-                sys.exit(1)
-            print(f"::add-mask::{value}")
-            lines_out.append(f"{key}={value}")
-        with open(out, "w", encoding="utf-8") as fh:
-            fh.write("\n".join(lines_out))
-            if lines_out:
-                fh.write("\n")
-        PY
+        python3 "${{ github.action_path }}/../scripts/migration_extra_env.py" write-json "$OUT"
         echo "extra_env_file=$OUT" >> "$GITHUB_OUTPUT"
 
     - name: Run migration Job
@@ -166,12 +141,11 @@ runs:
             },
         ]
         if extra_file and pathlib.Path(extra_file).is_file():
-            for raw in pathlib.Path(extra_file).read_text(encoding="utf-8").splitlines():
-                line = raw.strip()
-                if not line or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                env_list.append({"name": key, "value": value})
+            extra = json.loads(pathlib.Path(extra_file).read_text(encoding="utf-8"))
+            for item in extra:
+                env_list.append(
+                    {"name": item["name"], "value": item["value"]},
+                )
 
         manifest = {
             "apiVersion": "batch/v1",
