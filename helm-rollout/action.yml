@@ -1,14 +1,32 @@
 name: Helm rollout
 description: >
-  helm upgrade --install --reuse-values setting image.repository and image.tag
-  to the commit SHA. Optional helm repo add before upgrade.
+  helm upgrade --install for a local ./chart or upstream chart, setting
+  per-service image.repository / image.tag from the build matrix (or a single
+  image when images_json is empty). Supports GAR (GCP) and ECR (AWS) via
+  image_registry or cloud inputs.
 
 inputs:
   helm_chart:
     required: true
+  helm_chart_version:
+    description: Optional chart version pin (upstream charts)
+    required: false
+    default: ''
   helm_image_repository_suffix:
-    description: Image name under docker-images (repository suffix)
-    required: true
+    description: Image name under docker-images (single-image fallback)
+    required: false
+    default: ''
+  images_json:
+    description: >
+      JSON array from parse-image-matrix. Each object may include name and role
+      (api|frontend|worker|app). When set, sets services.<role>.image.* (or
+      worker.image.* for role=worker).
+    required: false
+    default: ''
+  changed_by_name:
+    description: Optional JSON map of image name -> bool (only roll changed images)
+    required: false
+    default: ''
   helm_release:
     description: Release name (falls back to HELM_RELEASE env/var if empty)
     required: false
@@ -19,16 +37,42 @@ inputs:
   helm_repo_url:
     required: false
     default: ''
+  values_files:
+    description: Comma-separated -f values files (default chart/values.yaml if present)
+    required: false
+    default: ''
+  cloud:
+    description: gcp or aws (used when image_registry is empty)
+    required: false
+    default: gcp
+  image_registry:
+    description: >
+      Full registry prefix (e.g. us-central1-docker.pkg.dev/proj/docker-images or
+      123.dkr.ecr.us-east-1.amazonaws.com/docker-images). When set, overrides cloud.
+    required: false
+    default: ''
   gcp_project_id:
-    required: true
+    required: false
+    default: ''
   gcp_region:
-    required: true
+    required: false
+    default: ''
+  aws_account_id:
+    required: false
+    default: ''
+  aws_region:
+    required: false
+    default: us-east-1
   k8s_namespace:
     required: true
   helm_release_var:
     description: Fallback release name when helm_release input is empty
     required: false
     default: ''
+  wait:
+    description: Pass --wait to helm upgrade
+    required: false
+    default: 'true'
 
 runs:
   using: composite
@@ -44,26 +88,158 @@ runs:
         RELEASE: ${{ inputs.helm_release }}
         RELEASE_VAR: ${{ inputs.helm_release_var }}
         CHART: ${{ inputs.helm_chart }}
+        CHART_VERSION: ${{ inputs.helm_chart_version }}
         IMAGE_SUFFIX: ${{ inputs.helm_image_repository_suffix }}
+        IMAGES_JSON: ${{ inputs.images_json }}
+        CHANGED_BY_NAME: ${{ inputs.changed_by_name }}
         REPO_NAME: ${{ inputs.helm_repo_name }}
         REPO_URL: ${{ inputs.helm_repo_url }}
+        VALUES_FILES: ${{ inputs.values_files }}
+        CLOUD: ${{ inputs.cloud }}
+        IMAGE_REGISTRY: ${{ inputs.image_registry }}
         REGION: ${{ inputs.gcp_region }}
         PROJECT_ID: ${{ inputs.gcp_project_id }}
+        AWS_ACCOUNT_ID: ${{ inputs.aws_account_id }}
+        AWS_REGION: ${{ inputs.aws_region }}
+        WAIT: ${{ inputs.wait }}
       run: |
         set -euo pipefail
+        # Caller may pass GATEWAY_HOSTNAME / ARTIFACTS_BUCKET / ENVIRONMENT via step env.
         if [ -n "${REPO_NAME:-}" ] && [ -n "${REPO_URL:-}" ]; then
           helm repo add "$REPO_NAME" "$REPO_URL" || true
           helm repo update "$REPO_NAME" || helm repo update || true
         fi
-        REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/docker-images"
-        IMAGE_REPO="${REGISTRY}/${IMAGE_SUFFIX}"
-        SET_ARGS=(--set "image.repository=${IMAGE_REPO}" --set "image.tag=${SHA}")
+
+        if [ -n "${IMAGE_REGISTRY:-}" ]; then
+          export REGISTRY="$IMAGE_REGISTRY"
+        elif [ "${CLOUD}" = "aws" ]; then
+          if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
+            echo "::error::aws_account_id or image_registry required for cloud=aws"
+            exit 1
+          fi
+          export REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-east-1}.amazonaws.com/docker-images"
+        else
+          if [ -z "${REGION:-}" ] || [ -z "${PROJECT_ID:-}" ]; then
+            echo "::error::gcp_region + gcp_project_id or image_registry required for cloud=gcp"
+            exit 1
+          fi
+          export REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/docker-images"
+        fi
+
         RELEASE_NAME="${RELEASE:-${RELEASE_VAR}}"
         if [ -z "$RELEASE_NAME" ]; then
           echo "::error::helm_release input or HELM_RELEASE var required"
           exit 1
         fi
+
+        if [ "$CHART" = "./chart" ] || [ "$CHART" = "chart" ]; then
+          if [ -f chart/Chart.yaml ] && grep -q '^dependencies:' chart/Chart.yaml; then
+            helm dependency update ./chart
+          fi
+        fi
+
+        mapfile -t SET_ARGS < <(python3 <<'PY'
+        import json, os
+        registry = os.environ["REGISTRY"]
+        sha = os.environ["SHA"]
+        images_raw = os.environ.get("IMAGES_JSON", "").strip()
+        changed_raw = os.environ.get("CHANGED_BY_NAME", "").strip()
+        suffix = os.environ.get("IMAGE_SUFFIX", "").strip()
+        hostname = os.environ.get("GATEWAY_HOSTNAME", "").strip()
+        artifacts = os.environ.get("ARTIFACTS_BUCKET", "").strip()
+        args = []
+        changed = None
+        if changed_raw:
+            try:
+                changed = json.loads(changed_raw)
+            except json.JSONDecodeError:
+                changed = None
+
+        def want(name: str) -> bool:
+            if changed is None:
+                return True
+            return bool(changed.get(name, True))
+
+        if images_raw and images_raw != "[]":
+            images = json.loads(images_raw)
+            for obj in images:
+                name = str(obj.get("name") or "").strip()
+                if not name or not want(name):
+                    continue
+                role = str(obj.get("role") or "").strip() or name.rsplit("-", 1)[-1]
+                image_repo = f"{registry}/{name}"
+                if role == "worker":
+                    args.append(f"worker.image.repository={image_repo}")
+                    args.append(f"worker.image.tag={sha}")
+                else:
+                    args.append(f"services.{role}.image.repository={image_repo}")
+                    args.append(f"services.{role}.image.tag={sha}")
+                    # OSS charts often use top-level image.*
+                    if role in ("api", "app"):
+                        args.append(f"image.repository={image_repo}")
+                        args.append(f"image.tag={sha}")
+        else:
+            if not suffix:
+                raise SystemExit("helm_image_repository_suffix or images_json required")
+            image_repo = f"{registry}/{suffix}"
+            args.append(f"image.repository={image_repo}")
+            args.append(f"image.tag={sha}")
+            args.append(f"services.api.image.repository={image_repo}")
+            args.append(f"services.api.image.tag={sha}")
+
+        if hostname:
+            args.append(f"server.value_options.allowed_hosts={hostname}")
+        if artifacts:
+            dest = artifacts if artifacts.startswith("gs://") or artifacts.startswith("s3://") else f"gs://{artifacts}"
+            args.append(f"mlflow.artifactsDestination={dest}")
+
+        for a in args:
+            print(a)
+        PY
+        )
+
+        HELM_SET=()
+        for a in "${SET_ARGS[@]+"${SET_ARGS[@]}"}"; do
+          HELM_SET+=(--set "$a")
+        done
+
+        FILE_ARGS=()
+        if [ -n "${VALUES_FILES:-}" ]; then
+          IFS=',' read -ra FILES <<< "$VALUES_FILES"
+          for f in "${FILES[@]}"; do
+            f=$(echo "$f" | xargs)
+            [ -n "$f" ] && FILE_ARGS+=(-f "$f")
+          done
+        elif [ -f chart/values.yaml ]; then
+          FILE_ARGS+=(-f chart/values.yaml)
+          if [ "${GITHUB_REF_NAME:-}" = "main" ] || [ "${GITHUB_BASE_REF:-}" = "main" ]; then
+            # Prefer env-specific overrides when present (prod on main default deploy).
+            if [ -f chart/values-prod.yaml ] && [ "${GITHUB_EVENT_NAME:-}" != "pull_request" ]; then
+              # Staging vs prod is selected by workflow env; use values-prod only when ENV=prod.
+              :
+            fi
+          fi
+        fi
+        # Append values-prod.yaml when deploying prod environment.
+        if [ -f chart/values-prod.yaml ] && [ "${GITHUB_REF:-}" != "" ]; then
+          case "${GITHUB_ENVIRONMENT:-${ENVIRONMENT:-}}" in
+            prod|production) FILE_ARGS+=(-f chart/values-prod.yaml) ;;
+          esac
+        fi
+
+        VERSION_ARGS=()
+        if [ -n "${CHART_VERSION:-}" ]; then
+          VERSION_ARGS+=(--version "$CHART_VERSION")
+        fi
+
+        WAIT_ARGS=()
+        if [ "${WAIT}" = "true" ]; then
+          WAIT_ARGS+=(--wait --timeout 5m)
+        fi
+
         helm upgrade --install "$RELEASE_NAME" "$CHART" -n "$NS" \
           --reuse-values \
-          "${SET_ARGS[@]}" \
-          --wait --timeout 5m
+          "${FILE_ARGS[@]}" \
+          "${VERSION_ARGS[@]}" \
+          "${HELM_SET[@]}" \
+          "${WAIT_ARGS[@]}"

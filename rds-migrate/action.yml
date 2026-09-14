@@ -1,0 +1,225 @@
+name: RDS migrate
+description: >
+  Run alembic upgrade head as a short-lived EKS Job (VPC-private RDS). Uses
+  ConfigMap app-env for DATABASE_* and Secret db for the password. Requires the
+  app Pulumi stack to have created namespace, app-env, and db Secret first.
+
+inputs:
+  aws_role_arn:
+    description: IAM role ARN for GitHub Actions OIDC
+    required: true
+  aws_region:
+    description: AWS region
+    required: true
+  deploy_env:
+    description: staging or prod (set as CONFIG_ENV on the Job)
+    required: true
+  eks_cluster_name:
+    required: true
+  eks_region:
+    description: Defaults to aws_region when empty
+    required: false
+    default: ''
+  k8s_namespace:
+    required: true
+  migration_image:
+    description: Full ECR image reference (registry/repo:tag)
+    required: true
+  migration_command:
+    description: Shell command run in the Job container
+    required: false
+    default: uv run alembic upgrade head
+  service_account:
+    description: Kubernetes ServiceAccount name (WI-bound app SA)
+    required: false
+    default: api
+  config_map_name:
+    description: ConfigMap with DATABASE_HOST / USER / NAME / etc.
+    required: false
+    default: app-env
+  db_secret_name:
+    description: K8s Secret with password key
+    required: false
+    default: db
+  db_secret_key:
+    required: false
+    default: password
+  extra_env:
+    description: Newline-delimited KEY=VALUE (literal env on the Job)
+    required: false
+    default: ''
+  job_timeout_seconds:
+    required: false
+    default: '600'
+
+runs:
+  using: composite
+  steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+      with:
+        role-to-assume: ${{ inputs.aws_role_arn }}
+        aws-region: ${{ inputs.aws_region }}
+
+    - name: Update kubeconfig for EKS
+      shell: bash
+      env:
+        CLUSTER: ${{ inputs.eks_cluster_name }}
+        REGION: ${{ inputs.eks_region }}
+        AWS_REGION: ${{ inputs.aws_region }}
+      run: |
+        set -euo pipefail
+        aws eks update-kubeconfig \
+          --name "$CLUSTER" \
+          --region "${REGION:-$AWS_REGION}"
+
+    - name: Apply extra migration env
+      id: extra
+      shell: bash
+      env:
+        EXTRA_ENV: ${{ inputs.extra_env }}
+      run: |
+        set -euo pipefail
+        OUT="${RUNNER_TEMP}/migrate-extra-env.txt"
+        : > "$OUT"
+        if [ -z "${EXTRA_ENV:-}" ]; then
+          echo "extra_env_file=$OUT" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        python3 <<'PY'
+        import os, re, sys
+
+        key_re = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+        extra = os.environ.get("EXTRA_ENV", "")
+        out = os.path.join(os.environ["RUNNER_TEMP"], "migrate-extra-env.txt")
+        lines_out = []
+        for lineno, raw in enumerate(extra.splitlines(), start=1):
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                print(f"::error::Invalid migration_extra_env at line {lineno}: missing '='", file=sys.stderr)
+                sys.exit(1)
+            key, value = line.split("=", 1)
+            if not key_re.match(key):
+                print(f"::error::Invalid migration_extra_env key at line {lineno}", file=sys.stderr)
+                sys.exit(1)
+            if any(ch in value for ch in "\n\r"):
+                print(f"::error::Invalid migration_extra_env value at line {lineno}: embedded newline", file=sys.stderr)
+                sys.exit(1)
+            print(f"::add-mask::{value}")
+            lines_out.append(f"{key}={value}")
+        with open(out, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines_out))
+            if lines_out:
+                fh.write("\n")
+        PY
+        echo "extra_env_file=$OUT" >> "$GITHUB_OUTPUT"
+
+    - name: Run migration Job
+      shell: bash
+      env:
+        NS: ${{ inputs.k8s_namespace }}
+        IMAGE: ${{ inputs.migration_image }}
+        CMD: ${{ inputs.migration_command }}
+        SA: ${{ inputs.service_account }}
+        CM: ${{ inputs.config_map_name }}
+        SECRET: ${{ inputs.db_secret_name }}
+        SECRET_KEY: ${{ inputs.db_secret_key }}
+        TIMEOUT: ${{ inputs.job_timeout_seconds }}
+        SHA: ${{ github.sha }}
+        DEPLOY_ENV: ${{ inputs.deploy_env }}
+        EXTRA_ENV_FILE: ${{ steps.extra.outputs.extra_env_file }}
+      run: |
+        set -euo pipefail
+        SHORT="${SHA:0:8}"
+        JOB="migrate-${SHORT}"
+        JOB=$(echo "$JOB" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | cut -c1-63)
+        export JOB_NAME="$JOB"
+
+        kubectl -n "$NS" delete job "$JOB" --ignore-not-found=true >/dev/null 2>&1 || true
+
+        python3 <<'PY'
+        import json
+        import os
+        import pathlib
+        import subprocess
+
+        ns = os.environ["NS"]
+        image = os.environ["IMAGE"]
+        cmd = os.environ["CMD"]
+        sa = os.environ["SA"]
+        cm = os.environ["CM"]
+        secret = os.environ["SECRET"]
+        secret_key = os.environ["SECRET_KEY"]
+        job = os.environ["JOB_NAME"]
+        deploy_env = os.environ["DEPLOY_ENV"]
+        extra_file = os.environ.get("EXTRA_ENV_FILE", "")
+
+        env_list = [
+            {"name": "CONFIG_ENV", "value": deploy_env},
+            {
+                "name": "DATABASE_PASSWORD",
+                "valueFrom": {
+                    "secretKeyRef": {"name": secret, "key": secret_key},
+                },
+            },
+        ]
+        if extra_file and pathlib.Path(extra_file).is_file():
+            for raw in pathlib.Path(extra_file).read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if not line or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                env_list.append({"name": key, "value": value})
+
+        manifest = {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": {
+                "name": job,
+                "namespace": ns,
+                "labels": {"app.kubernetes.io/component": "migrate"},
+            },
+            "spec": {
+                "backoffLimit": 0,
+                "ttlSecondsAfterFinished": 600,
+                "template": {
+                    "metadata": {
+                        "labels": {"app.kubernetes.io/component": "migrate"},
+                    },
+                    "spec": {
+                        "serviceAccountName": sa,
+                        "restartPolicy": "Never",
+                        "containers": [
+                            {
+                                "name": "migrate",
+                                "image": image,
+                                "imagePullPolicy": "Always",
+                                "command": ["/bin/sh", "-c", cmd],
+                                "envFrom": [{"configMapRef": {"name": cm}}],
+                                "env": env_list,
+                            }
+                        ],
+                    },
+                },
+            },
+        }
+
+        path = pathlib.Path(os.environ["RUNNER_TEMP"]) / f"{job}.json"
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        print(f"Applying Job {job} in {ns}")
+        subprocess.run(["kubectl", "apply", "-f", str(path)], check=True)
+        PY
+
+        TIMEOUT="${TIMEOUT:-600}"
+        if ! kubectl -n "$NS" wait --for=condition=complete "job/${JOB}" --timeout="${TIMEOUT}s"; then
+          echo "::error::Migration Job ${JOB} failed or timed out"
+          kubectl -n "$NS" describe "job/${JOB}" || true
+          kubectl -n "$NS" logs "job/${JOB}" --all-containers=true || true
+          kubectl -n "$NS" delete job "$JOB" --ignore-not-found=true || true
+          exit 1
+        fi
+        echo "Migration Job ${JOB} completed"
+        kubectl -n "$NS" logs "job/${JOB}" --all-containers=true || true
+        kubectl -n "$NS" delete job "$JOB" --ignore-not-found=true || true

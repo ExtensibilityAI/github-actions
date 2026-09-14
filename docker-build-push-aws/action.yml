@@ -1,0 +1,155 @@
+name: Docker build and push (AWS ECR)
+description: |
+  Authenticate via AWS OIDC, optionally set up CodeArtifact PyPI auth, build with
+  cache-from :latest, push :sha and :latest when image content changed. Images land
+  in ECR as {registry_prefix}/{image_name} (creates the repository if missing).
+
+inputs:
+  image_name:
+    description: Image / ECR repository suffix (e.g. lims-api under docker-images/)
+    required: true
+  context:
+    description: Docker build context path
+    required: false
+    default: .
+  dockerfile:
+    description: Path to Dockerfile relative to repo root
+    required: false
+    default: Dockerfile
+  aws_role_arn:
+    description: IAM role ARN for GitHub Actions OIDC
+    required: true
+  aws_region:
+    description: AWS region for ECR
+    required: true
+  aws_account_id:
+    description: AWS account ID (for ECR registry hostname)
+    required: true
+  ecr_repository_prefix:
+    description: ECR repository name prefix (matches platform dockerRepoName)
+    required: false
+    default: docker-images
+  needs_pypi_auth:
+    description: Whether to authenticate to CodeArtifact PyPI before build
+    required: false
+    default: 'false'
+  uv_index_prefix:
+    description: UV index prefix (e.g. EXTENSIBILITY_AI)
+    required: false
+    default: EXTENSIBILITY_AI
+  build_secret_env:
+    description: >
+      Env var name to pass as Docker BuildKit secret (e.g. UV_INDEX_*_PASSWORD).
+      Empty skips --secret.
+    required: false
+    default: ''
+
+outputs:
+  image_changed:
+    description: true if image was pushed (content differs from :latest)
+    value: ${{ steps.push.outputs.image_changed }}
+  image_ref:
+    description: Full image reference with commit SHA tag
+    value: ${{ steps.push.outputs.image_ref }}
+
+runs:
+  using: composite
+  steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+      with:
+        role-to-assume: ${{ inputs.aws_role_arn }}
+        aws-region: ${{ inputs.aws_region }}
+
+    - name: Setup CodeArtifact auth
+      if: inputs.needs_pypi_auth == 'true'
+      uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.1.1
+      with:
+        aws_role_arn: ${{ inputs.aws_role_arn }}
+        aws_region: ${{ inputs.aws_region }}
+        uv_index_prefix: ${{ inputs.uv_index_prefix }}
+
+    - name: Login to Amazon ECR
+      id: ecr
+      uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
+
+    - name: Ensure ECR repository
+      shell: bash
+      env:
+        IMAGE_NAME: ${{ inputs.image_name }}
+        PREFIX: ${{ inputs.ecr_repository_prefix }}
+        REGION: ${{ inputs.aws_region }}
+      run: |
+        set -euo pipefail
+        REPO="${PREFIX}/${IMAGE_NAME}"
+        if ! aws ecr describe-repositories --repository-names "$REPO" --region "$REGION" &>/dev/null; then
+          aws ecr create-repository --repository-name "$REPO" --region "$REGION" --image-scanning-configuration scanOnPush=true >/dev/null
+          echo "Created ECR repository ${REPO}"
+        fi
+
+    - name: Pull previous image for cache
+      shell: bash
+      env:
+        REGISTRY: ${{ steps.ecr.outputs.registry }}
+        PREFIX: ${{ inputs.ecr_repository_prefix }}
+        IMAGE_NAME: ${{ inputs.image_name }}
+      run: |
+        set -euo pipefail
+        REF="${REGISTRY}/${PREFIX}/${IMAGE_NAME}:latest"
+        docker pull "$REF" 2>/dev/null || true
+
+    - name: Build image
+      id: build
+      shell: bash
+      env:
+        REGISTRY: ${{ steps.ecr.outputs.registry }}
+        PREFIX: ${{ inputs.ecr_repository_prefix }}
+        IMAGE_NAME: ${{ inputs.image_name }}
+        CONTEXT: ${{ inputs.context }}
+        DOCKERFILE: ${{ inputs.dockerfile }}
+        BUILD_SECRET_ENV: ${{ inputs.build_secret_env }}
+      run: |
+        set -euo pipefail
+        FULL_REPO="${REGISTRY}/${PREFIX}/${IMAGE_NAME}"
+        SECRET_ARGS=()
+        if [ -n "${BUILD_SECRET_ENV:-}" ]; then
+          SECRET_ARGS+=(--secret "id=uv_pypi_password,env=${BUILD_SECRET_ENV}")
+        fi
+        docker build -f "$DOCKERFILE" "$CONTEXT" \
+          "${SECRET_ARGS[@]}" \
+          --cache-from="${FULL_REPO}:latest" \
+          -t "${FULL_REPO}:build"
+        OUR_ID=$(docker image inspect --format='{{.Id}}' "${FULL_REPO}:build")
+        if docker image inspect "${FULL_REPO}:latest" &>/dev/null; then
+          PREV_ID=$(docker image inspect --format='{{.Id}}' "${FULL_REPO}:latest")
+          if [ "$OUR_ID" = "$PREV_ID" ]; then
+            echo "unchanged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "unchanged=false" >> "$GITHUB_OUTPUT"
+          fi
+        else
+          echo "unchanged=false" >> "$GITHUB_OUTPUT"
+        fi
+        echo "full_repo=$FULL_REPO" >> "$GITHUB_OUTPUT"
+
+    - name: Push image
+      id: push
+      shell: bash
+      env:
+        FULL_REPO: ${{ steps.build.outputs.full_repo }}
+        UNCHANGED: ${{ steps.build.outputs.unchanged }}
+        SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+        REF="${FULL_REPO}:${SHA}"
+        echo "image_ref=$REF" >> "$GITHUB_OUTPUT"
+        if [ "$UNCHANGED" = "true" ]; then
+          echo "image_changed=false" >> "$GITHUB_OUTPUT"
+          echo "Image unchanged from registry :latest; skipping push."
+          exit 0
+        fi
+        docker tag "${FULL_REPO}:build" "$REF"
+        docker tag "${FULL_REPO}:build" "${FULL_REPO}:latest"
+        docker push "$REF"
+        docker push "${FULL_REPO}:latest"
+        echo "image_changed=true" >> "$GITHUB_OUTPUT"
