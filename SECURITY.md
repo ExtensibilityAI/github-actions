@@ -38,7 +38,7 @@ Use this when onboarding a new repository that consumes `ExtensibilityAI/github-
 ### Secrets
 
 - [ ] Prefer explicit `secrets:` mappings over blanket `secrets: inherit` when only a subset is needed.
-- [ ] `migration_extra_env` is passed as a **workflow_call secret**, never in `with:` inputs.
+- [ ] `migration_extra_env` is passed as a **workflow_call secret**, never in `with:` inputs. Multiline PEMs are OK (heredoc / Job JSON); do not log the blob.
 - [ ] Pulumi and GitHub App credentials are scoped to the minimum stacks/repos required.
 
 ### Pinning

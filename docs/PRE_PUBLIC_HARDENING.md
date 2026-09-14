@@ -11,7 +11,7 @@ Current posture: solid WIF-first design, SHA-pinned third-party actions, BuildKi
 
 | ID | Status | Issue | Action |
 |----|--------|-------|--------|
-| H1 | Done | `migration_extra_env` unsafe `$GITHUB_ENV` append | Key allowlist, newline rejection, `::add-mask::` |
+| H1 | Done | `migration_extra_env` unsafe `$GITHUB_ENV` append | Key allowlist, multiline via heredoc (`scripts/migration_extra_env.py`), per-line `::add-mask::` |
 | H2 | Done | Prod on any `push` | Gate prod on `main`/tags; feature branches → staging |
 | H3 | Done | Unconstrained `dispatch_environment` | Whitelist `staging\|prod` |
 | G1 | Done | No `LICENSE` | Apache-2.0 at repo root |

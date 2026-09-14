@@ -16,7 +16,7 @@ Centralize CI/CD patterns (GCP GKE/Helm and AWS EKS/Helm deploy, package publish
 | Branch filters | Deploy callers must trigger production only from `main` or release tags (`on.push.branches: [main]`). PRs resolve to `staging` via `set-deploy-env`. |
 | Environments | Configure GitHub Environment protection on `prod` (required reviewers). The library `release` workflow uses the `release` environment for tag pushes. |
 | Secrets | No long-lived cloud keys in GitHub secrets for GCP; use WIF. Pulumi callers **must** pass `INFRA_GITHUB_APP_ID` / `INFRA_GITHUB_APP_PRIVATE_KEY` explicitly — `secrets: inherit` only works in the same GitHub organization or enterprise, so customer orgs (e.g. ExtensibilityStore) calling this library get empty App credentials. Pulumi GCS backends use environment variable `PULUMI_BACKEND_URL`. |
-| App-agnostic | Reusable workflows/actions must **never** reference product-specific `vars.*` / `secrets.*` names (e.g. `SCAFFOLDER_*`). Callers may pass opaque `KEY=VALUE` blobs via the `migration_extra_env` **secret** (not a `with:` input — GitHub forbids `secrets.*` in reusable workflow inputs). |
+| App-agnostic | Reusable workflows/actions must **never** reference product-specific `vars.*` / `secrets.*` names (e.g. `SCAFFOLDER_*`). Callers may pass opaque `KEY=VALUE` blobs via the `migration_extra_env` **secret** (not a `with:` input — GitHub forbids `secrets.*` in reusable workflow inputs). Multiline values (PEMs) are supported: lines after `KEY=` continue until the next allowlisted `KEY=` assignment. |
 | Third-party actions | Pin third-party actions to full commit SHAs with a `# vN` comment. |
 
 ## Supported surface
@@ -32,7 +32,7 @@ Centralize CI/CD patterns (GCP GKE/Helm and AWS EKS/Helm deploy, package publish
 
 - Semver tags: `vMAJOR.MINOR.PATCH` (annotated)
 - Moving major tag: `v2` points at the latest `v2.x.y`
-- Callers: `ExtensibilityAI/github-actions/<action>@v2.1.2` or reusable workflow path `@v2.1.2`. **GCP Pulumi** GCS backends require `@v2.2.0` (or later) plus GitHub environment variable `PULUMI_BACKEND_URL`.
+- Callers: `ExtensibilityAI/github-actions/<action>@v2.5.0` or reusable workflow path `@v2.5.0` (multiline `migration_extra_env`; Helm-native deploy). Older pins: `@v2.4.0` for Helm-only without multiline migrate. **GCP Pulumi** GCS backends require `@v2.4.0` (or later) plus GitHub environment variable `PULUMI_BACKEND_URL`.
 
 Release via Actions → **Release** → `workflow_dispatch` with version input (from `main` or `trunk`). The job runs in the GitHub Environment **`release`** — configure required reviewers on that environment before cutting tags.
 
@@ -123,7 +123,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/ci-python-package.yml@v2.1.2
+    uses: ExtensibilityAI/github-actions/.github/workflows/ci-python-package.yml@v2.4.0
     with:
       needs_pypi_auth: true
       uv_index_prefix: EXTENSIBILITY_AI
@@ -134,7 +134,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/publish-python-package.yml@v2.1.2
+    uses: ExtensibilityAI/github-actions/.github/workflows/publish-python-package.yml@v2.4.0
     with:
       uv_index_prefix: EXTENSIBILITY_AI
     secrets: inherit
@@ -167,7 +167,9 @@ jobs:
 Deploy is **Helm-only** (no `deploy_method` / kubectl). Pass `helm_chart` (local `./chart` or upstream).
 Product-specific migrate env (scaffolder only) belongs in the **caller** as a
 `secrets:` mapping (cannot use `secrets: inherit` in the same job when passing an
-explicit secret). Vars may be interpolated into the secret value:
+explicit secret). Vars may be interpolated into the secret value. Multiline
+secrets (PEMs) may span lines after `KEY=`; `cloud-sql-migrate` / `rds-migrate`
+write them via GITHUB_ENV heredocs (or JSON Job env on EKS):
 
 ```yaml
     secrets:
@@ -212,7 +214,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-gcp.yml@v2.2.1
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-gcp.yml@v2.4.0
     with:
       environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
       slug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.slug || '' }}
@@ -233,7 +235,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-aws.yml@v2.2.1
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-aws.yml@v2.4.0
     with:
       platform_stack_name: infrastructure-core-aws  # or your repo’s platform project name
       environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
@@ -255,7 +257,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-gcp.yml@v2.2.2
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-gcp.yml@v2.4.0
     with:
       slug: ${{ github.event.inputs.slug }}
       environment: ${{ github.event.inputs.environment }}
@@ -273,7 +275,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-aws.yml@v2.2.2
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-aws.yml@v2.4.0
     with:
       slug: ${{ github.event.inputs.slug }}
       environment: ${{ github.event.inputs.environment }}

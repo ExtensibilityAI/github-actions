@@ -49,7 +49,7 @@ jobs:
     outputs:
       pulumi_env: ${{ steps.env.outputs.env }}
     steps:
-      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.1.1
+      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.4.0
         id: env
         with:
           mode: app
@@ -81,7 +81,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Setup CodeArtifact auth
-        uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.1.1
+        uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.4.0
         with:
           aws_role_arn: ${{ vars.AWS_ROLE_ARN }}
           aws_region: ${{ vars.AWS_REGION }}
@@ -111,7 +111,7 @@ jobs:
 
       - name: Detect changed stacks
         id: detect
-        uses: ExtensibilityAI/github-actions/detect-changes@v2.1.1
+        uses: ExtensibilityAI/github-actions/detect-changes@v2.4.0
         with:
           event-name: ${{ github.event_name }}
           diff-range: ${{ steps.diff.outputs.range }}
@@ -136,7 +136,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Resolve GitHub token
         id: github-token
-        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.2
+        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.4.0
         with:
           infra-github-token: ${{ secrets.INFRA_GITHUB_TOKEN }}
           app-id: ${{ secrets.INFRA_GITHUB_APP_ID }}
@@ -148,7 +148,7 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
       - name: Setup CodeArtifact auth
-        uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.1.1
+        uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.4.0
         with:
           aws_role_arn: ${{ vars.AWS_ROLE_ARN }}
           aws_region: ${{ vars.AWS_REGION }}
@@ -160,7 +160,7 @@ jobs:
         run: uv sync
       - name: Resolve Pulumi org
         id: pulumi_org
-        uses: ExtensibilityAI/github-actions/resolve-pulumi-org@v2.1.1
+        uses: ExtensibilityAI/github-actions/resolve-pulumi-org@v2.4.0
         with:
           pulumi-dir: pulumi/platform
           stack: ${{ needs.detect-changes.outputs.pulumi_env }}
@@ -206,7 +206,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Resolve GitHub token
         id: github-token
-        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.1.2
+        uses: ExtensibilityAI/github-actions/resolve-github-token@v2.4.0
         with:
           infra-github-token: ${{ secrets.INFRA_GITHUB_TOKEN }}
           app-id: ${{ secrets.INFRA_GITHUB_APP_ID }}
@@ -218,7 +218,7 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
       - name: Setup CodeArtifact auth
-        uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.1.1
+        uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.4.0
         with:
           aws_role_arn: ${{ vars.AWS_ROLE_ARN }}
           aws_region: ${{ vars.AWS_REGION }}
@@ -237,7 +237,7 @@ jobs:
         run: uv sync
       - name: Resolve Pulumi org
         id: pulumi_org
-        uses: ExtensibilityAI/github-actions/resolve-pulumi-org@v2.1.1
+        uses: ExtensibilityAI/github-actions/resolve-pulumi-org@v2.4.0
         with:
           pulumi-dir: ${{ matrix.workdir }}
           stack: ${{ needs.detect-changes.outputs.pulumi_env }}
