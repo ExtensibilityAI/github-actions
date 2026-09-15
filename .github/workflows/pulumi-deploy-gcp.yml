@@ -166,6 +166,12 @@ jobs:
           set -euo pipefail
           uri=$(uv run infra utils resolve-pulumi-secrets-provider --pulumi-dir pulumi/platform --stack "${{ needs.detect-changes.outputs.pulumi_env }}")
           echo "secrets-provider=$uri" >> "$GITHUB_OUTPUT"
+      - name: Sync DIY stack secrets YAML
+        uses: ExtensibilityAI/github-actions/sync-diy-stack-secrets@v2.6.4
+        with:
+          backend-url: ${{ env.PULUMI_BACKEND_URL }}
+          stack: ${{ needs.detect-changes.outputs.pulumi_env }}
+          working-directory: pulumi/platform
       - name: Pulumi up (platform)
         working-directory: pulumi/platform
         env:
@@ -174,42 +180,6 @@ jobs:
           PULUMI_SECRETS_PROVIDER: ${{ steps.pulumi_sp.outputs.secrets-provider }}
         run: |
           set -euo pipefail
-          # DIY backends store the data key in Pulumi.<stack>.yaml. If a prior
-          # create left the stack in GCS but never committed encryptedkey, select
-          # fails with a false passphrase error. Rehydrate from the checkpoint.
-          STACK="${{ needs.detect-changes.outputs.pulumi_env }}"
-          PROJECT=$(grep '^name:' Pulumi.yaml | awk '{print $2}')
-          STACK_YAML="Pulumi.${STACK}.yaml"
-          if [ -n "${PULUMI_BACKEND_URL:-}" ] && [[ "$PULUMI_BACKEND_URL" == gs://* ]] && [ -f "$STACK_YAML" ]; then
-            if ! grep -q '^encryptedkey:' "$STACK_YAML"; then
-              python3 - "$PULUMI_BACKEND_URL" "$PROJECT" "$STACK" "$STACK_YAML" <<'PY'
-import json, subprocess, sys
-backend, project, stack, path = sys.argv[1:5]
-uri = f"{backend.rstrip('/')}/.pulumi/stacks/{project}/{stack}.json"
-try:
-    raw = subprocess.check_output(["gsutil", "cat", uri], stderr=subprocess.DEVNULL)
-except subprocess.CalledProcessError:
-    sys.exit(0)
-data = json.loads(raw)
-sp = ((data.get("checkpoint") or {}).get("latest") or {}).get("secrets_providers") or {}
-state = sp.get("state") or {}
-url = (state.get("url") or "").strip()
-key = (state.get("encryptedkey") or "").strip()
-if not url or not key:
-    sys.exit(0)
-text = open(path, encoding="utf-8").read()
-if not text.endswith("\n"):
-    text += "\n"
-if "secretsprovider:" not in text:
-    text += f"secretsprovider: {url}\n"
-if "encryptedkey:" not in text:
-    text += f"encryptedkey: {key}\n"
-open(path, "w", encoding="utf-8").write(text)
-print(f"Synced secretsprovider/encryptedkey into {path} from {uri}")
-PY
-            fi
-          fi
-
           FQN="${{ steps.pulumi_org.outputs.pulumi-org }}/${{ needs.detect-changes.outputs.platform_stack_name }}/${{ needs.detect-changes.outputs.pulumi_env }}"
           if ! uv run pulumi stack select "$FQN"; then
             uv run pulumi stack select "$FQN" --create --secrets-provider "$PULUMI_SECRETS_PROVIDER"
@@ -277,6 +247,12 @@ PY
           set -euo pipefail
           uri=$(uv run infra utils resolve-pulumi-secrets-provider --pulumi-dir "${{ matrix.workdir }}" --stack "${{ needs.detect-changes.outputs.pulumi_env }}" --fallback-pulumi-dir pulumi/platform)
           echo "secrets-provider=$uri" >> "$GITHUB_OUTPUT"
+      - name: Sync DIY stack secrets YAML
+        uses: ExtensibilityAI/github-actions/sync-diy-stack-secrets@v2.6.4
+        with:
+          backend-url: ${{ env.PULUMI_BACKEND_URL }}
+          stack: ${{ needs.detect-changes.outputs.pulumi_env }}
+          working-directory: ${{ matrix.workdir }}
       - name: Pulumi up (app stack)
         working-directory: ${{ matrix.workdir }}
         env:
@@ -285,42 +261,6 @@ PY
           PULUMI_SECRETS_PROVIDER: ${{ steps.pulumi_sp.outputs.secrets-provider }}
         run: |
           set -euo pipefail
-          # DIY backends store the data key in Pulumi.<stack>.yaml. If a prior
-          # create left the stack in GCS but never committed encryptedkey, select
-          # fails with a false passphrase error. Rehydrate from the checkpoint.
-          STACK="${{ needs.detect-changes.outputs.pulumi_env }}"
-          PROJECT=$(grep '^name:' Pulumi.yaml | awk '{print $2}')
-          STACK_YAML="Pulumi.${STACK}.yaml"
-          if [ -n "${PULUMI_BACKEND_URL:-}" ] && [[ "$PULUMI_BACKEND_URL" == gs://* ]] && [ -f "$STACK_YAML" ]; then
-            if ! grep -q '^encryptedkey:' "$STACK_YAML"; then
-              python3 - "$PULUMI_BACKEND_URL" "$PROJECT" "$STACK" "$STACK_YAML" <<'PY'
-import json, subprocess, sys
-backend, project, stack, path = sys.argv[1:5]
-uri = f"{backend.rstrip('/')}/.pulumi/stacks/{project}/{stack}.json"
-try:
-    raw = subprocess.check_output(["gsutil", "cat", uri], stderr=subprocess.DEVNULL)
-except subprocess.CalledProcessError:
-    sys.exit(0)
-data = json.loads(raw)
-sp = ((data.get("checkpoint") or {}).get("latest") or {}).get("secrets_providers") or {}
-state = sp.get("state") or {}
-url = (state.get("url") or "").strip()
-key = (state.get("encryptedkey") or "").strip()
-if not url or not key:
-    sys.exit(0)
-text = open(path, encoding="utf-8").read()
-if not text.endswith("\n"):
-    text += "\n"
-if "secretsprovider:" not in text:
-    text += f"secretsprovider: {url}\n"
-if "encryptedkey:" not in text:
-    text += f"encryptedkey: {key}\n"
-open(path, "w", encoding="utf-8").write(text)
-print(f"Synced secretsprovider/encryptedkey into {path} from {uri}")
-PY
-            fi
-          fi
-
           FQN="${{ steps.pulumi_org.outputs.pulumi-org }}/$(grep '^name:' Pulumi.yaml | awk '{print $2}')/${{ needs.detect-changes.outputs.pulumi_env }}"
           if ! uv run pulumi stack select "$FQN"; then
             uv run pulumi stack select "$FQN" --create --secrets-provider "$PULUMI_SECRETS_PROVIDER"
