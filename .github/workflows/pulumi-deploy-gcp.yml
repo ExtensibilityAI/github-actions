@@ -178,8 +178,9 @@ jobs:
           if ! uv run pulumi stack select "$FQN"; then
             uv run pulumi stack select "$FQN" --create --secrets-provider "$PULUMI_SECRETS_PROVIDER"
           fi
-          # Clear abandoned locks from cancelled CI runs (no-op if none).
-          uv run pulumi cancel --yes || true
+          # Do not `pulumi cancel` here: after canceling a stale in-progress update,
+          # DIY/gcpkms stacks can fail the next op with a misleading passphrase error.
+          # Stale locks are cleared by concurrency groups; operators can gsutil-rm locks.
           uv run pulumi up --yes
 
   app-stacks:
@@ -252,6 +253,7 @@ jobs:
           if ! uv run pulumi stack select "$FQN"; then
             uv run pulumi stack select "$FQN" --create --secrets-provider "$PULUMI_SECRETS_PROVIDER"
           fi
-          # Clear abandoned locks from cancelled CI runs (no-op if none).
-          uv run pulumi cancel --yes || true
+          # Do not `pulumi cancel` here: after canceling a stale in-progress update,
+          # DIY/gcpkms stacks can fail the next op with a misleading passphrase error.
+          # Stale locks are cleared by concurrency groups; operators can gsutil-rm locks.
           uv run pulumi up --yes
