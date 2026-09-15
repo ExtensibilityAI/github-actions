@@ -124,7 +124,7 @@ jobs:
     environment: ${{ needs.detect-changes.outputs.pulumi_env }}
     concurrency:
       group: platform-${{ needs.detect-changes.outputs.pulumi_env }}-${{ github.ref }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     env:
       PULUMI_BACKEND_URL: ${{ vars.PULUMI_BACKEND_URL }}
     permissions:
@@ -171,9 +171,15 @@ jobs:
         env:
           GITHUB_ACCESS_TOKEN: ${{ steps.github-token.outputs.token }}
           GH_TOKEN: ${{ steps.github-token.outputs.token }}
+          PULUMI_SECRETS_PROVIDER: ${{ steps.pulumi_sp.outputs.secrets-provider }}
         run: |
           set -euo pipefail
-          uv run pulumi stack select "${{ steps.pulumi_org.outputs.pulumi-org }}/${{ needs.detect-changes.outputs.platform_stack_name }}/${{ needs.detect-changes.outputs.pulumi_env }}" --create --secrets-provider "${{ steps.pulumi_sp.outputs.secrets-provider }}"
+          FQN="${{ steps.pulumi_org.outputs.pulumi-org }}/${{ needs.detect-changes.outputs.platform_stack_name }}/${{ needs.detect-changes.outputs.pulumi_env }}"
+          if ! uv run pulumi stack select "$FQN"; then
+            uv run pulumi stack select "$FQN" --create --secrets-provider "$PULUMI_SECRETS_PROVIDER"
+          fi
+          # Clear abandoned locks from cancelled CI runs (no-op if none).
+          uv run pulumi cancel --yes || true
           uv run pulumi up --yes
 
   app-stacks:
@@ -191,7 +197,7 @@ jobs:
         include: ${{ fromJson(needs.detect-changes.outputs.app_stack_matrix) }}
     concurrency:
       group: app-${{ matrix.slug }}-${{ needs.detect-changes.outputs.pulumi_env }}-${{ github.ref }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     env:
       PULUMI_BACKEND_URL: ${{ vars.PULUMI_BACKEND_URL }}
     permissions:
@@ -239,7 +245,13 @@ jobs:
         env:
           GITHUB_ACCESS_TOKEN: ${{ steps.github-token.outputs.token }}
           GH_TOKEN: ${{ steps.github-token.outputs.token }}
+          PULUMI_SECRETS_PROVIDER: ${{ steps.pulumi_sp.outputs.secrets-provider }}
         run: |
           set -euo pipefail
-          uv run pulumi stack select "${{ steps.pulumi_org.outputs.pulumi-org }}/$(grep '^name:' Pulumi.yaml | awk '{print $2}')/${{ needs.detect-changes.outputs.pulumi_env }}" --create --secrets-provider "${{ steps.pulumi_sp.outputs.secrets-provider }}"
+          FQN="${{ steps.pulumi_org.outputs.pulumi-org }}/$(grep '^name:' Pulumi.yaml | awk '{print $2}')/${{ needs.detect-changes.outputs.pulumi_env }}"
+          if ! uv run pulumi stack select "$FQN"; then
+            uv run pulumi stack select "$FQN" --create --secrets-provider "$PULUMI_SECRETS_PROVIDER"
+          fi
+          # Clear abandoned locks from cancelled CI runs (no-op if none).
+          uv run pulumi cancel --yes || true
           uv run pulumi up --yes
