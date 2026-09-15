@@ -3,13 +3,16 @@ description: |
   If Pulumi.<stack>.yaml lacks encryptedkey on a gs:// DIY backend, copy
   secretsprovider + encryptedkey from the GCS checkpoint so stack select does
   not fail with a false passphrase error. Reads project name from Pulumi.yaml
-  in the current working directory.
+  in the pulumi program directory.
 inputs:
   backend-url:
     description: PULUMI_BACKEND_URL (gs://…)
     required: true
   stack:
     description: Stack suffix (staging or prod)
+    required: true
+  working-directory:
+    description: Pulumi program directory (relative to repo root)
     required: true
 runs:
   using: composite
@@ -18,8 +21,10 @@ runs:
       env:
         BACKEND_URL: ${{ inputs.backend-url }}
         STACK: ${{ inputs.stack }}
+        WORKDIR: ${{ inputs.working-directory }}
       run: |
         set -euo pipefail
+        cd "$WORKDIR"
         PROJECT=$(grep '^name:' Pulumi.yaml | awk '{print $2}')
         STACK_YAML="Pulumi.${STACK}.yaml"
         python3 "${{ github.action_path }}/sync.py" \
