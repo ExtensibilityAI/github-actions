@@ -119,10 +119,18 @@ jobs:
       - name: Setup Helm
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
 
+      - name: Resolve Pulumi secrets provider
+        id: pulumi_sp
+        run: |
+          set -euo pipefail
+          uri=$(uv run infra utils resolve-pulumi-secrets-provider --pulumi-dir "${{ steps.stack.outputs.workdir }}" --stack "${{ inputs.environment }}" --fallback-pulumi-dir pulumi/platform)
+          echo "secrets-provider=$uri" >> "$GITHUB_OUTPUT"
+
       - name: Destroy app (helm uninstall + pulumi destroy)
         env:
           GITHUB_ACCESS_TOKEN: ${{ steps.github-token.outputs.token }}
           GH_TOKEN: ${{ steps.github-token.outputs.token }}
+          PULUMI_SECRETS_PROVIDER: ${{ steps.pulumi_sp.outputs.secrets-provider }}
           PULUMI_ENV: ${{ inputs.environment }}
           PULUMI_ORG: ${{ steps.pulumi_org.outputs.pulumi-org }}
           INPUT_SLUG: ${{ inputs.slug }}
