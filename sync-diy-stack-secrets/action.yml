@@ -1,0 +1,26 @@
+name: Sync DIY stack secrets YAML
+description: |
+  If Pulumi.<stack>.yaml lacks encryptedkey on a gs:// DIY backend, copy
+  secretsprovider + encryptedkey from the GCS checkpoint so stack select does
+  not fail with a false passphrase error. Reads project name from Pulumi.yaml
+  in the current working directory.
+inputs:
+  backend-url:
+    description: PULUMI_BACKEND_URL (gs://…)
+    required: true
+  stack:
+    description: Stack suffix (staging or prod)
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        BACKEND_URL: ${{ inputs.backend-url }}
+        STACK: ${{ inputs.stack }}
+      run: |
+        set -euo pipefail
+        PROJECT=$(grep '^name:' Pulumi.yaml | awk '{print $2}')
+        STACK_YAML="Pulumi.${STACK}.yaml"
+        python3 "${{ github.action_path }}/sync.py" \
+          "$BACKEND_URL" "$PROJECT" "$STACK" "$STACK_YAML"
