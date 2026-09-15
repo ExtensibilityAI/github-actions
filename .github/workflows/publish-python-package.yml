@@ -12,9 +12,14 @@ on:
         required: false
         default: '3.11'
       uv_index_prefix:
+        description: >
+          Prefix for UV_INDEX_<prefix>_PYPI_* credentials. Must match the
+          [[tool.uv.index]] name with hyphens turned into underscores and
+          without a trailing _PYPI (e.g. EXT_STORE_INFRA_3320 for index
+          ext-store-infra-3320-pypi). No default — callers must pass the
+          deployment-specific prefix.
         type: string
-        required: false
-        default: EXTENSIBILITY_AI
+        required: true
       pyproject_path:
         description: Path to pyproject.toml relative to working_directory
         type: string

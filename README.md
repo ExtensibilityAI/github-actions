@@ -32,7 +32,8 @@ Centralize CI/CD patterns (GCP GKE/Helm and AWS EKS/Helm deploy, package publish
 
 - Semver tags: `vMAJOR.MINOR.PATCH` (annotated)
 - Moving major tag: `v2` points at the latest `v2.x.y`
-- Callers: `ExtensibilityAI/github-actions/<action>@v2.5.0` or reusable workflow path `@v2.5.0` (multiline `migration_extra_env`; Helm-native deploy). Older pins: `@v2.4.0` for Helm-only without multiline migrate. **GCP Pulumi** GCS backends require `@v2.4.0` (or later) plus GitHub environment variable `PULUMI_BACKEND_URL`.
+- Callers: `ExtensibilityAI/github-actions/<action>@v2.6.0` or reusable workflow path `@v2.6.0` (required `uv_index_prefix`; multiline `migration_extra_env`; Helm-native deploy). Older pins: `@v2.5.0` for Helm-native without required prefix; `@v2.4.0` for Helm-only without multiline migrate. **GCP Pulumi** GCS backends require `@v2.4.0` (or later) plus GitHub environment variable `PULUMI_BACKEND_URL`.
+- **`uv_index_prefix` is required** on reusable workflows that authenticate to a private uv index (no default). Pass the deployment-specific prefix that matches `[[tool.uv.index]]` (hyphens→underscores, without trailing `_PYPI`), e.g. `EXT_STORE_INFRA_3320` for index `ext-store-infra-3320-pypi`.
 
 Release via Actions → **Release** → `workflow_dispatch` with version input (from `main` or `trunk`). The job runs in the GitHub Environment **`release`** — configure required reviewers on that environment before cutting tags.
 
@@ -123,7 +124,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/ci-python-package.yml@v2.4.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/ci-python-package.yml@v2.6.0
     with:
       needs_pypi_auth: true
       uv_index_prefix: EXTENSIBILITY_AI
@@ -134,7 +135,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/publish-python-package.yml@v2.4.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/publish-python-package.yml@v2.6.0
     with:
       uv_index_prefix: EXTENSIBILITY_AI
     secrets: inherit
@@ -148,7 +149,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/deploy-gke-app.yml@v2.4.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/deploy-gke-app.yml@v2.6.0
     with:
       images: |
         [{"name":"lims-api","dockerfile":"backend/Dockerfile","needs_pypi_auth":true,"build_secret_env":"UV_INDEX_EXTENSIBILITY_AI_PYPI_PASSWORD","role":"api"},
@@ -188,7 +189,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/deploy-eks-app.yml@v2.4.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/deploy-eks-app.yml@v2.6.0
     with:
       images: |
         [{"name":"lims-api","dockerfile":"backend/Dockerfile","needs_pypi_auth":true,"build_secret_env":"UV_INDEX_ACCOUNT_PYPI_PASSWORD","role":"api"}]
@@ -214,8 +215,9 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-gcp.yml@v2.4.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-gcp.yml@v2.6.0
     with:
+      uv_index_prefix: EXT_STORE_INFRA_3320  # must match [[tool.uv.index]] name
       environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
       slug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.slug || '' }}
       target: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || 'both' }}
@@ -235,9 +237,10 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-aws.yml@v2.4.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-deploy-aws.yml@v2.6.0
     with:
       platform_stack_name: infrastructure-core-aws  # or your repo’s platform project name
+      uv_index_prefix: ACCOUNT
       environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
       slug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.slug || '' }}
       target: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || 'both' }}
@@ -257,8 +260,9 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-gcp.yml@v2.4.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-gcp.yml@v2.6.0
     with:
+      uv_index_prefix: EXT_STORE_INFRA_3320
       slug: ${{ github.event.inputs.slug }}
       environment: ${{ github.event.inputs.environment }}
     secrets:
@@ -275,8 +279,9 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-aws.yml@v2.4.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/pulumi-destroy-app-aws.yml@v2.6.0
     with:
+      uv_index_prefix: ACCOUNT
       slug: ${{ github.event.inputs.slug }}
       environment: ${{ github.event.inputs.environment }}
     secrets:
