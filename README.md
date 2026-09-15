@@ -32,7 +32,7 @@ Centralize CI/CD patterns (GCP GKE/Helm and AWS EKS/Helm deploy, package publish
 
 - Semver tags: `vMAJOR.MINOR.PATCH` (annotated)
 - Moving major tag: `v2` points at the latest `v2.x.y`
-- Callers: `ExtensibilityAI/github-actions/<action>@v2.6.0` or reusable workflow path `@v2.6.1` (required `uv_index_prefix`; multiline `migration_extra_env`; Helm-native deploy). Older pins: `@v2.5.0` for Helm-native without required prefix; `@v2.4.0` for Helm-only without multiline migrate. **GCP Pulumi** GCS backends require `@v2.4.0` (or later) plus GitHub environment variable `PULUMI_BACKEND_URL`.
+- Callers: `ExtensibilityAI/github-actions/<action>@v2.6.0` or reusable workflow path `@v2.6.2` (required `uv_index_prefix`; multiline `migration_extra_env`; Helm-native deploy). Older pins: `@v2.5.0` for Helm-native without required prefix; `@v2.4.0` for Helm-only without multiline migrate. **GCP Pulumi** GCS backends require `@v2.4.0` (or later) plus GitHub environment variable `PULUMI_BACKEND_URL`.
 - **`uv_index_prefix` is required** on reusable workflows that authenticate to a private uv index (no default). Pass the deployment-specific prefix that matches `[[tool.uv.index]]` (hyphens→underscores, without trailing `_PYPI`), e.g. `EXT_STORE_INFRA_3320` for index `ext-store-infra-3320-pypi`.
 
 Release via Actions → **Release** → `workflow_dispatch` with version input (from `main` or `trunk`). The job runs in the GitHub Environment **`release`** — configure required reviewers on that environment before cutting tags.
