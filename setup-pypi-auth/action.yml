@@ -12,8 +12,10 @@ inputs:
     required: true
   uv_index_prefix:
     description: >
-      Prefix for UV_INDEX_* env vars (e.g. EXTENSIBILITY_AI produces
-      UV_INDEX_EXTENSIBILITY_AI_PYPI_USERNAME / _PASSWORD)
+      Prefix for UV_INDEX_* env vars. Must match the [[tool.uv.index]] name with
+      hyphens→underscores and without a trailing _PYPI (e.g. EXT_STORE_INFRA_3320
+      for index ext-store-infra-3320-pypi produces
+      UV_INDEX_EXT_STORE_INFRA_3320_PYPI_USERNAME / _PASSWORD).
     required: true
 
 runs:
