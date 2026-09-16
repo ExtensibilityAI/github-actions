@@ -131,6 +131,13 @@ jobs:
           uri=$(uv run infra utils resolve-pulumi-secrets-provider --pulumi-dir "${{ steps.stack.outputs.workdir }}" --stack "${{ inputs.environment }}" --fallback-pulumi-dir pulumi/platform)
           echo "secrets-provider=$uri" >> "$GITHUB_OUTPUT"
 
+      - name: Sync DIY stack secrets YAML
+        uses: ExtensibilityAI/github-actions/sync-diy-stack-secrets@v2.6.5
+        with:
+          backend-url: ${{ env.PULUMI_BACKEND_URL }}
+          stack: ${{ inputs.environment }}
+          working-directory: ${{ steps.stack.outputs.workdir }}
+
       - name: Destroy app (helm uninstall + pulumi destroy)
         env:
           GITHUB_ACCESS_TOKEN: ${{ steps.github-token.outputs.token }}

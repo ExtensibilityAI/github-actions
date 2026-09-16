@@ -175,6 +175,12 @@ jobs:
           set -euo pipefail
           uri=$(uv run infra utils resolve-pulumi-secrets-provider --pulumi-dir pulumi/platform --stack "${{ needs.detect-changes.outputs.pulumi_env }}")
           echo "secrets-provider=$uri" >> "$GITHUB_OUTPUT"
+      - name: Sync DIY stack secrets YAML
+        uses: ExtensibilityAI/github-actions/sync-diy-stack-secrets@v2.6.5
+        with:
+          backend-url: ${{ env.PULUMI_BACKEND_URL }}
+          stack: ${{ needs.detect-changes.outputs.pulumi_env }}
+          working-directory: pulumi/platform
       - name: Pulumi up (platform)
         working-directory: pulumi/platform
         env:
@@ -260,6 +266,12 @@ jobs:
           set -euo pipefail
           uri=$(uv run infra utils resolve-pulumi-secrets-provider --pulumi-dir "${{ matrix.workdir }}" --stack "${{ needs.detect-changes.outputs.pulumi_env }}" --fallback-pulumi-dir pulumi/platform)
           echo "secrets-provider=$uri" >> "$GITHUB_OUTPUT"
+      - name: Sync DIY stack secrets YAML
+        uses: ExtensibilityAI/github-actions/sync-diy-stack-secrets@v2.6.5
+        with:
+          backend-url: ${{ env.PULUMI_BACKEND_URL }}
+          stack: ${{ needs.detect-changes.outputs.pulumi_env }}
+          working-directory: ${{ matrix.workdir }}
       - name: Pulumi up (app stack)
         working-directory: ${{ matrix.workdir }}
         env:
