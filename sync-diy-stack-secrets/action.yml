@@ -1,12 +1,12 @@
 name: Sync DIY stack secrets YAML
 description: |
-  If Pulumi.<stack>.yaml lacks encryptedkey on a gs:// DIY backend, copy
-  secretsprovider + encryptedkey from the GCS checkpoint so stack select does
+  If Pulumi.<stack>.yaml lacks encryptedkey on a gs:// or s3:// DIY backend, copy
+  secretsprovider + encryptedkey from the backend checkpoint so stack select does
   not fail with a false passphrase error. Reads project name from Pulumi.yaml
   in the pulumi program directory.
 inputs:
   backend-url:
-    description: PULUMI_BACKEND_URL (gs://…)
+    description: PULUMI_BACKEND_URL (gs://… or s3://…)
     required: true
   stack:
     description: Stack suffix (staging or prod)

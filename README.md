@@ -15,7 +15,7 @@ Centralize CI/CD patterns (GCP GKE/Helm and AWS EKS/Helm deploy, package publish
 | Identity | GCP Workload Identity Federation must require `attribute.repository` (and prefer repo allowlists). See [SECURITY.md](SECURITY.md) for an IAM condition example and caller audit checklist. |
 | Branch filters | Deploy callers must trigger production only from `main` or release tags (`on.push.branches: [main]`). PRs resolve to `staging` via `set-deploy-env`. |
 | Environments | Configure GitHub Environment protection on `prod` (required reviewers). The library `release` workflow uses the `release` environment for tag pushes. |
-| Secrets | No long-lived cloud keys in GitHub secrets for GCP; use WIF. Pulumi callers **must** pass `INFRA_GITHUB_APP_ID` / `INFRA_GITHUB_APP_PRIVATE_KEY` explicitly — `secrets: inherit` only works in the same GitHub organization or enterprise, so customer orgs (e.g. ExtensibilityStore) calling this library get empty App credentials. Pulumi GCS backends use environment variable `PULUMI_BACKEND_URL`. |
+| Secrets | No long-lived cloud keys in GitHub secrets for GCP; use WIF. Pulumi callers **must** pass `INFRA_GITHUB_APP_ID` / `INFRA_GITHUB_APP_PRIVATE_KEY` explicitly — `secrets: inherit` only works in the same GitHub organization or enterprise, so customer orgs (e.g. ExtensibilityStore) calling this library get empty App credentials. Pulumi DIY backends use environment variable `PULUMI_BACKEND_URL` (`gs://…` or `s3://…`). |
 | App-agnostic | Reusable workflows/actions must **never** reference product-specific `vars.*` / `secrets.*` names (e.g. `SCAFFOLDER_*`). Callers may pass opaque `KEY=VALUE` blobs via the `migration_extra_env` **secret** (not a `with:` input — GitHub forbids `secrets.*` in reusable workflow inputs). Multiline values (PEMs) are supported: lines after `KEY=` continue until the next allowlisted `KEY=` assignment. |
 | Third-party actions | Pin third-party actions to full commit SHAs with a `# vN` comment. |
 
@@ -32,7 +32,7 @@ Centralize CI/CD patterns (GCP GKE/Helm and AWS EKS/Helm deploy, package publish
 
 - Semver tags: `vMAJOR.MINOR.PATCH` (annotated)
 - Moving major tag: `v2` points at the latest `v2.x.y`
-- Callers: `ExtensibilityAI/github-actions/<action>@v2.6.0` or reusable workflow path `@v2.6.2` (required `uv_index_prefix`; multiline `migration_extra_env`; Helm-native deploy). Older pins: `@v2.5.0` for Helm-native without required prefix; `@v2.4.0` for Helm-only without multiline migrate. **GCP Pulumi** GCS backends require `@v2.4.0` (or later) plus GitHub environment variable `PULUMI_BACKEND_URL`.
+- Callers: `ExtensibilityAI/github-actions/<action>@v2.6.5` or reusable workflow path `@v2.6.5` (required `uv_index_prefix`; multiline `migration_extra_env`; Helm-native deploy; DIY secrets sync for GCS **and** S3). Older pins: `@v2.6.0`–`@v2.6.4` for Helm-native without S3 sync; `@v2.5.0` for Helm-native without required prefix; `@v2.4.0` for Helm-only without multiline migrate. **Pulumi DIY backends** require GitHub environment variable `PULUMI_BACKEND_URL` (`gs://…` or `s3://…`).
 - **`uv_index_prefix` is required** on reusable workflows that authenticate to a private uv index (no default). Pass the deployment-specific prefix that matches `[[tool.uv.index]]` (hyphens→underscores, without trailing `_PYPI`), e.g. `EXT_STORE_INFRA_3320` for index `ext-store-infra-3320-pypi`.
 
 Release via Actions → **Release** → `workflow_dispatch` with version input (from `main` or `trunk`). The job runs in the GitHub Environment **`release`** — configure required reviewers on that environment before cutting tags.
@@ -84,6 +84,7 @@ actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`). Lo
 | `publish-python-sdk` | Version rewrite + twine to Artifact Registry PyPI |
 | `publish-python-sdk-aws` | Version rewrite + twine to CodeArtifact PyPI |
 | `helm-rollout` | SHA-based helm upgrade --reuse-values |
+| `sync-diy-stack-secrets` | Rehydrate `secretsprovider`/`encryptedkey` from GCS or S3 DIY checkpoint into `Pulumi.<stack>.yaml` |
 
 ### Pulumi GitHub token
 
