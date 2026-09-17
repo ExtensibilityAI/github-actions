@@ -74,13 +74,14 @@ jobs:
 
       - name: Setup CodeArtifact auth
         if: inputs.cloud == 'aws'
-        uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.4.0
+        uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.6.7
         with:
           aws_role_arn: ${{ vars.AWS_ROLE_ARN }}
           aws_region: ${{ vars.AWS_REGION }}
           uv_index_prefix: ${{ inputs.uv_index_prefix }}
           codeartifact_domain: ${{ vars.CODEARTIFACT_DOMAIN }}
-          codeartifact_repo: ${{ vars.CODEARTIFACT_REPO || 'pypi' }}
+          codeartifact_repo: ${{ vars.CODEARTIFACT_REPOSITORY || 'pypi' }}
+          codeartifact_domain_owner: ${{ vars.CODEARTIFACT_DOMAIN_OWNER }}
 
       - name: Self-hosted Renovate
         uses: renovatebot/github-action@v46.2.2

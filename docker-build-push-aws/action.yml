@@ -37,6 +37,18 @@ inputs:
     description: UV index prefix (e.g. EXTENSIBILITY_AI)
     required: false
     default: EXTENSIBILITY_AI
+  codeartifact_domain:
+    description: CodeArtifact domain (falls back to CODEARTIFACT_DOMAIN env)
+    required: false
+    default: ''
+  codeartifact_repo:
+    description: CodeArtifact repository name
+    required: false
+    default: pypi
+  codeartifact_domain_owner:
+    description: Account that owns the CodeArtifact domain
+    required: false
+    default: ''
   build_secret_env:
     description: >
       Env var name to pass as Docker BuildKit secret (e.g. UV_INDEX_*_PASSWORD).
@@ -63,11 +75,15 @@ runs:
 
     - name: Setup CodeArtifact auth
       if: inputs.needs_pypi_auth == 'true'
-      uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.4.0
+      uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.6.7
       with:
         aws_role_arn: ${{ inputs.aws_role_arn }}
         aws_region: ${{ inputs.aws_region }}
         uv_index_prefix: ${{ inputs.uv_index_prefix }}
+        codeartifact_domain: ${{ inputs.codeartifact_domain }}
+        codeartifact_repo: ${{ inputs.codeartifact_repo }}
+        codeartifact_domain_owner: ${{ inputs.codeartifact_domain_owner }}
+        required: 'true'
 
     - name: Login to Amazon ECR
       id: ecr
