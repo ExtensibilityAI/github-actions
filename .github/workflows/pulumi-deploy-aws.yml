@@ -196,7 +196,9 @@ jobs:
           # Do not `pulumi cancel` here: after canceling a stale in-progress update,
           # DIY/gcpkms stacks can fail the next op with a misleading passphrase error.
           # Stale locks are cleared by concurrency groups; operators can gsutil-rm locks.
-          uv run infra utils drop-assume-role-if-in-account --pulumi-dir . --stack "${{ needs.detect-changes.outputs.pulumi_env }}" || true
+          # Run infra from the repo root project: this step's working-directory is
+          # pulumi/platform, where `uv run infra` cannot spawn the root CLI.
+          uv run --project "$GITHUB_WORKSPACE" infra utils drop-assume-role-if-in-account --pulumi-dir . --stack "${{ needs.detect-changes.outputs.pulumi_env }}"
           uv run pulumi up --yes
 
   app-stacks:
@@ -287,5 +289,7 @@ jobs:
           # Do not `pulumi cancel` here: after canceling a stale in-progress update,
           # DIY/gcpkms stacks can fail the next op with a misleading passphrase error.
           # Stale locks are cleared by concurrency groups; operators can gsutil-rm locks.
-          uv run infra utils drop-assume-role-if-in-account --pulumi-dir . --stack "${{ needs.detect-changes.outputs.pulumi_env }}" || true
+          # Run infra from the repo root project: this step's working-directory is the
+          # app stack, where `uv run infra` cannot spawn the root CLI.
+          uv run --project "$GITHUB_WORKSPACE" infra utils drop-assume-role-if-in-account --pulumi-dir . --stack "${{ needs.detect-changes.outputs.pulumi_env }}"
           uv run pulumi up --yes
