@@ -19,6 +19,18 @@ inputs:
     description: CodeArtifact repository name
     required: false
     default: pypi
+  codeartifact_domain_owner:
+    description: >
+      Account that owns the CodeArtifact domain (canonical/prod member).
+      Falls back to CODEARTIFACT_DOMAIN_OWNER, then the caller account.
+    required: false
+    default: ''
+  required:
+    description: >
+      If true, fail when the domain is unset (app stacks). If false, skip
+      token export with a warning (public-PyPI platform jobs).
+    required: false
+    default: 'false'
 
 runs:
   using: composite
@@ -47,16 +59,25 @@ runs:
         UV_INDEX_PREFIX: ${{ inputs.uv_index_prefix }}
         INPUT_DOMAIN: ${{ inputs.codeartifact_domain }}
         INPUT_REPO: ${{ inputs.codeartifact_repo }}
+        INPUT_OWNER: ${{ inputs.codeartifact_domain_owner }}
+        REQUIRE_DOMAIN: ${{ inputs.required }}
       run: |
         set -euo pipefail
         DOMAIN="${INPUT_DOMAIN:-${CODEARTIFACT_DOMAIN:-}}"
         REPO="${INPUT_REPO:-pypi}"
-        ACCOUNT="${AWS_ACCOUNT_ID:-$(aws sts get-caller-identity --query Account --output text)}"
+        OWNER="${INPUT_OWNER:-${CODEARTIFACT_DOMAIN_OWNER:-}}"
+        if [ -z "$OWNER" ]; then
+          OWNER="${AWS_ACCOUNT_ID:-$(aws sts get-caller-identity --query Account --output text)}"
+        fi
         if [ -z "$DOMAIN" ]; then
+          if [ "${REQUIRE_DOMAIN}" = "true" ]; then
+            echo "::error::CODEARTIFACT_DOMAIN is required for this job (app stack CodeArtifact index)"
+            exit 1
+          fi
           echo "::warning::CODEARTIFACT_DOMAIN not set; skipping CodeArtifact token export"
           exit 0
         fi
-        TOKEN="$(aws codeartifact get-authorization-token --domain "$DOMAIN" --domain-owner "$ACCOUNT" --query authorizationToken --output text)"
+        TOKEN="$(aws codeartifact get-authorization-token --domain "$DOMAIN" --domain-owner "$OWNER" --query authorizationToken --output text)"
         echo "UV_INDEX_${UV_INDEX_PREFIX}_PYPI_USERNAME=aws" >> "$GITHUB_ENV"
         echo "::add-mask::$TOKEN"
         echo "UV_INDEX_${UV_INDEX_PREFIX}_PYPI_PASSWORD=$TOKEN" >> "$GITHUB_ENV"

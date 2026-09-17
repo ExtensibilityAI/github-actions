@@ -32,7 +32,7 @@ Centralize CI/CD patterns (GCP GKE/Helm and AWS EKS/Helm deploy, package publish
 
 - Semver tags: `vMAJOR.MINOR.PATCH` (annotated)
 - Moving major tag: `v2` points at the latest `v2.x.y`
-- Callers: `ExtensibilityAI/github-actions/<action>@v2.6.6` or reusable workflow path `@v2.6.6` (required `uv_index_prefix`; multiline `migration_extra_env`; Helm-native deploy; DIY secrets sync for GCS **and** S3; AWS `drop-assume-role` via root `infra` CLI). Older pins: `@v2.6.5` for S3 DIY sync without the assume-role CLI fix; `@v2.6.0`–`@v2.6.4` for Helm-native without S3 sync; `@v2.5.0` for Helm-native without required prefix; `@v2.4.0` for Helm-only without multiline migrate. **Pulumi DIY backends** require GitHub environment variable `PULUMI_BACKEND_URL` (`gs://…` or `s3://…`).
+- Callers: `ExtensibilityAI/github-actions/<action>@v2.6.7` or reusable workflow path `@v2.6.7` (AWS CodeArtifact `CODEARTIFACT_DOMAIN_OWNER` + fail-closed app-stack auth; required `uv_index_prefix`; multiline `migration_extra_env`; Helm-native deploy; DIY secrets sync for GCS **and** S3; AWS `drop-assume-role` via root `infra` CLI). Older pins: `@v2.6.6` for assume-role CLI without domain-owner; `@v2.6.5` for S3 DIY sync without the assume-role CLI fix; `@v2.6.0`–`@v2.6.4` for Helm-native without S3 sync; `@v2.5.0` for Helm-native without required prefix; `@v2.4.0` for Helm-only without multiline migrate. **Pulumi DIY backends** require GitHub environment variable `PULUMI_BACKEND_URL` (`gs://…` or `s3://…`).
 - **`uv_index_prefix` is required** on reusable workflows that authenticate to a private uv index (no default). Pass the deployment-specific prefix that matches `[[tool.uv.index]]` (hyphens→underscores, without trailing `_PYPI`), e.g. `EXT_STORE_INFRA_3320` for index `ext-store-infra-3320-pypi`.
 
 Release via Actions → **Release** → `workflow_dispatch` with version input (from `main` or `trunk`). The job runs in the GitHub Environment **`release`** — configure required reviewers on that environment before cutting tags.
@@ -69,7 +69,7 @@ actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`). Lo
 | Action | Description |
 | --- | --- |
 | `setup-pypi-auth` | WIF + export `UV_INDEX_*` for Artifact Registry PyPI |
-| `setup-codeartifact-auth` | AWS OIDC + CodeArtifact token for uv |
+| `setup-codeartifact-auth` | AWS OIDC + CodeArtifact token for uv (`codeartifact_domain_owner`; `required` fails closed) |
 | `resolve-github-token` | Mint GitHub App installation token as `GITHUB_ACCESS_TOKEN` / `GH_TOKEN` (do not overwrite reserved `GITHUB_TOKEN`) |
 | `resolve-pulumi-org` | `uv run infra utils resolve-pulumi-org` |
 | `detect-changes` | `uv run infra utils detect-changes` (platform → apps deploy order) |
@@ -206,7 +206,7 @@ jobs:
 
 **SDK publish** uses `publish-python-sdk-aws` → CodeArtifact. Ensure `infra-gh` (or `codeartifact.publisherPrincipals`) can `PublishPackageVersion`.
 
-Requires environment vars from the app/platform Pulumi sync: `AWS_ROLE_ARN`, `AWS_REGION`, `AWS_ACCOUNT_ID`, `EKS_CLUSTER_NAME`, `K8S_NAMESPACE`, `HELM_RELEASE` (optional `IMAGE_REGISTRY`, `EKS_REGION`, `CODEARTIFACT_DOMAIN`, `CODEARTIFACT_REPOSITORY`).
+Requires environment vars from the app/platform Pulumi sync: `AWS_ROLE_ARN`, `AWS_REGION`, `AWS_ACCOUNT_ID`, `EKS_CLUSTER_NAME`, `K8S_NAMESPACE`, `HELM_RELEASE` (optional `IMAGE_REGISTRY`, `EKS_REGION`; CodeArtifact: `CODEARTIFACT_DOMAIN`, `CODEARTIFACT_DOMAIN_OWNER`, optional `CODEARTIFACT_REPOSITORY`).
 
 ### Pulumi (GCP)
 
@@ -297,6 +297,6 @@ jobs:
 
 **GCP vars:** `WIF_PROVIDER`, `GCP_SA`, `GCP_PROJECT_ID`, `GCP_REGION`, `PULUMI_BACKEND_URL` (as used by your stacks)
 
-**AWS vars:** `AWS_ROLE_ARN`, `AWS_REGION`, `AWS_ACCOUNT_ID`, `PULUMI_BACKEND_URL`, `CODEARTIFACT_DOMAIN` (and optional `CODEARTIFACT_REPOSITORY`); for EKS deploy/destroy also `EKS_CLUSTER_NAME`, `K8S_NAMESPACE`, `HELM_RELEASE` (optional `EKS_REGION`, `IMAGE_REGISTRY`)
+**AWS vars:** `AWS_ROLE_ARN`, `AWS_REGION`, `AWS_ACCOUNT_ID`, `PULUMI_BACKEND_URL`, `CODEARTIFACT_DOMAIN`, `CODEARTIFACT_DOMAIN_OWNER` (canonical/prod member that owns the domain; optional `CODEARTIFACT_REPOSITORY`, default `pypi`); for EKS deploy/destroy also `EKS_CLUSTER_NAME`, `K8S_NAMESPACE`, `HELM_RELEASE` (optional `EKS_REGION`, `IMAGE_REGISTRY`)
 
 Composite actions that nest other composites **must** use fully-qualified `ExtensibilityAI/github-actions/<name>@vX.Y.Z` pins. Relative `./` paths resolve in the *caller* workspace and break cross-repo.

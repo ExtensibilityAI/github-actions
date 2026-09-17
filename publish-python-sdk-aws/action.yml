@@ -30,6 +30,12 @@ inputs:
     description: CodeArtifact repository name
     required: false
     default: pypi
+  codeartifact_domain_owner:
+    description: >
+      Account that owns the CodeArtifact domain (canonical/prod member).
+      Falls back to CODEARTIFACT_DOMAIN_OWNER, then aws_account_id.
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -41,13 +47,15 @@ runs:
       run: uv python install 3.11
 
     - name: Authenticate to CodeArtifact
-      uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.4.0
+      uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.6.7
       with:
         aws_role_arn: ${{ inputs.aws_role_arn }}
         aws_region: ${{ inputs.aws_region }}
         uv_index_prefix: ${{ inputs.uv_index_prefix }}
         codeartifact_domain: ${{ inputs.codeartifact_domain }}
         codeartifact_repo: ${{ inputs.codeartifact_repo }}
+        codeartifact_domain_owner: ${{ inputs.codeartifact_domain_owner }}
+        required: 'true'
 
     - name: Resolve SDK version
       shell: bash
@@ -74,12 +82,13 @@ runs:
         REGION: ${{ inputs.aws_region }}
         INPUT_DOMAIN: ${{ inputs.codeartifact_domain }}
         INPUT_REPO: ${{ inputs.codeartifact_repo }}
+        INPUT_OWNER: ${{ inputs.codeartifact_domain_owner }}
         INPUT_ACCOUNT: ${{ inputs.aws_account_id }}
       run: |
         set -euo pipefail
         DOMAIN="${INPUT_DOMAIN:-${CODEARTIFACT_DOMAIN:-}}"
         REPO="${INPUT_REPO:-pypi}"
-        ACCOUNT="${INPUT_ACCOUNT:-${AWS_ACCOUNT_ID:-}}"
+        ACCOUNT="${INPUT_OWNER:-${CODEARTIFACT_DOMAIN_OWNER:-${INPUT_ACCOUNT:-${AWS_ACCOUNT_ID:-}}}}"
         if [ -z "$ACCOUNT" ]; then
           ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
         fi

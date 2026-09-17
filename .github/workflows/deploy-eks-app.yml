@@ -148,7 +148,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: ExtensibilityAI/github-actions/docker-build-push-aws@v2.4.0
+      - uses: ExtensibilityAI/github-actions/docker-build-push-aws@v2.6.7
         id: build
         with:
           image_name: ${{ matrix.name }}
@@ -160,6 +160,9 @@ jobs:
           ecr_repository_prefix: ${{ inputs.ecr_repository_prefix }}
           needs_pypi_auth: ${{ matrix.needs_pypi_auth }}
           uv_index_prefix: ${{ inputs.uv_index_prefix }}
+          codeartifact_domain: ${{ vars.CODEARTIFACT_DOMAIN }}
+          codeartifact_repo: ${{ vars.CODEARTIFACT_REPOSITORY || 'pypi' }}
+          codeartifact_domain_owner: ${{ vars.CODEARTIFACT_DOMAIN_OWNER }}
           build_secret_env: ${{ matrix.build_secret_env }}
 
       - name: Write image-changed artifact
@@ -228,7 +231,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: ExtensibilityAI/github-actions/publish-python-sdk-aws@v2.4.0
+      - uses: ExtensibilityAI/github-actions/publish-python-sdk-aws@v2.6.7
         with:
           deploy_env: ${{ needs.set-env.outputs.env }}
           working_directory: ${{ inputs.sdk_directory }}
@@ -238,6 +241,7 @@ jobs:
           aws_account_id: ${{ vars.AWS_ACCOUNT_ID }}
           codeartifact_domain: ${{ vars.CODEARTIFACT_DOMAIN }}
           codeartifact_repo: ${{ vars.CODEARTIFACT_REPOSITORY || 'pypi' }}
+          codeartifact_domain_owner: ${{ vars.CODEARTIFACT_DOMAIN_OWNER }}
 
   migrations:
     needs: [set-env, build-summary]
