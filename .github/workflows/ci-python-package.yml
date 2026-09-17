@@ -34,6 +34,11 @@ on:
         type: string
         required: false
         default: staging
+      cloud:
+        description: gcp (Artifact Registry WIF) or aws (CodeArtifact OIDC). Default gcp.
+        type: string
+        required: false
+        default: gcp
 
 jobs:
   test:
@@ -53,13 +58,25 @@ jobs:
       - name: Set up Python
         run: uv python install ${{ inputs.python_version }}
 
-      - name: Authenticate to PyPI
-        if: inputs.needs_pypi_auth
-        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.4.0
+      - name: Authenticate to PyPI (GCP)
+        if: ${{ inputs.needs_pypi_auth && inputs.cloud != 'aws' }}
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.6.8
         with:
           wif_provider: ${{ vars.WIF_PROVIDER }}
           pypi_sa: ${{ vars.PYPI_SA }}
           uv_index_prefix: ${{ inputs.uv_index_prefix }}
+
+      - name: Authenticate to CodeArtifact (AWS)
+        if: ${{ inputs.needs_pypi_auth && inputs.cloud == 'aws' }}
+        uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.6.8
+        with:
+          aws_role_arn: ${{ vars.PYPI_ROLE_ARN || vars.AWS_ROLE_ARN }}
+          aws_region: ${{ vars.AWS_REGION }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+          codeartifact_domain: ${{ vars.CODEARTIFACT_DOMAIN }}
+          codeartifact_repo: ${{ vars.CODEARTIFACT_REPOSITORY || 'pypi' }}
+          codeartifact_domain_owner: ${{ vars.CODEARTIFACT_DOMAIN_OWNER }}
+          required: 'true'
 
       - name: Install
         run: uv sync --extra dev

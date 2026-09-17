@@ -231,7 +231,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: ExtensibilityAI/github-actions/publish-python-sdk-aws@v2.6.7
+      - uses: ExtensibilityAI/github-actions/publish-python-sdk-aws@v2.6.8
         with:
           deploy_env: ${{ needs.set-env.outputs.env }}
           working_directory: ${{ inputs.sdk_directory }}

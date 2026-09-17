@@ -23,7 +23,7 @@ Centralize CI/CD patterns (GCP GKE/Helm and AWS EKS/Helm deploy, package publish
 
 - **GCP GKE / Helm**: JSON image matrix build & push, optional Cloud SQL migrations, Helm rollout
 - **AWS EKS / Helm**: JSON image matrix build & push to ECR, optional RDS migrate Job + CodeArtifact SDK publish, Helm rollout (`deploy-eks-app.yml`)
-- **Python packages**: CI (blocking ruff + pytest) and publish to Artifact Registry PyPI
+- **Python packages**: CI (blocking ruff + pytest) and publish to Artifact Registry PyPI or AWS CodeArtifact (`cloud: gcp|aws`)
 - **Python backends**: CI with Postgres; light import CI; compose-config CI
 - **Pulumi**: path-filtered platform + app stack deploys (GCP and AWS), app-stack destroy; per-stack `uv sync` in stack workdirs plus root CLI sync
 - **Renovate**: self-hosted infra dependency updates (`renovate-infra-deps.yml`) with caller-owned `renovate.json`; auth via Infra GitHub App (`INFRA_GITHUB_APP_*`), same as Pulumi deploy — no dedicated `RENOVATE_TOKEN`
@@ -32,7 +32,7 @@ Centralize CI/CD patterns (GCP GKE/Helm and AWS EKS/Helm deploy, package publish
 
 - Semver tags: `vMAJOR.MINOR.PATCH` (annotated)
 - Moving major tag: `v2` points at the latest `v2.x.y`
-- Callers: `ExtensibilityAI/github-actions/<action>@v2.6.7` or reusable workflow path `@v2.6.7` (AWS CodeArtifact `CODEARTIFACT_DOMAIN_OWNER` + fail-closed app-stack auth; required `uv_index_prefix`; multiline `migration_extra_env`; Helm-native deploy; DIY secrets sync for GCS **and** S3; AWS `drop-assume-role` via root `infra` CLI). Older pins: `@v2.6.6` for assume-role CLI without domain-owner; `@v2.6.5` for S3 DIY sync without the assume-role CLI fix; `@v2.6.0`–`@v2.6.4` for Helm-native without S3 sync; `@v2.5.0` for Helm-native without required prefix; `@v2.4.0` for Helm-only without multiline migrate. **Pulumi DIY backends** require GitHub environment variable `PULUMI_BACKEND_URL` (`gs://…` or `s3://…`).
+- Callers: `ExtensibilityAI/github-actions/<action>@v2.6.8` or reusable workflow path `@v2.6.8` (`cloud: aws` on python CI/publish; CodeArtifact twine URL `/pypi/{repo}/`; `CODEARTIFACT_DOMAIN_OWNER` + fail-closed app-stack auth; required `uv_index_prefix`; multiline `migration_extra_env`; Helm-native deploy; DIY secrets sync for GCS **and** S3; AWS `drop-assume-role` via root `infra` CLI). Older pins: `@v2.6.7` for CodeArtifact domain-owner without python `cloud`; `@v2.6.6` for assume-role CLI without domain-owner; `@v2.6.5` for S3 DIY sync without the assume-role CLI fix; `@v2.6.0`–`@v2.6.4` for Helm-native without S3 sync; `@v2.5.0` for Helm-native without required prefix; `@v2.4.0` for Helm-only without multiline migrate. **Pulumi DIY backends** require GitHub environment variable `PULUMI_BACKEND_URL` (`gs://…` or `s3://…`).
 - **`uv_index_prefix` is required** on reusable workflows that authenticate to a private uv index (no default). Pass the deployment-specific prefix that matches `[[tool.uv.index]]` (hyphens→underscores, without trailing `_PYPI`), e.g. `EXT_STORE_INFRA_3320` for index `ext-store-infra-3320-pypi`.
 
 Release via Actions → **Release** → `workflow_dispatch` with version input (from `main` or `trunk`). The job runs in the GitHub Environment **`release`** — configure required reviewers on that environment before cutting tags.
@@ -100,9 +100,9 @@ actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`). Lo
 
 | Workflow | Description |
 | --- | --- |
-| `ci-python-package.yml` | uv sync, **blocking** ruff, pytest for a Python package |
-| `publish-python-package.yml` | Version rewrite + twine to GAR PyPI |
-| `ci-python-backend.yml` | Backend + Postgres, blocking ruff, pytest; optional frontend job |
+| `ci-python-package.yml` | uv sync, **blocking** ruff, pytest; `cloud: gcp` (default) or `aws` |
+| `publish-python-package.yml` | Version rewrite + twine to GAR PyPI or CodeArtifact (`cloud: gcp|aws`) |
+| `ci-python-backend.yml` | Backend + Postgres, blocking ruff, pytest; optional frontend job; `cloud: gcp|aws` |
 | `ci-python-light.yml` | Lightweight uv sync / import or pytest (no private index) |
 | `ci-compose-config.yml` | bash -n scripts + `docker compose config` |
 | `deploy-gke-app.yml` | Image matrix build, optional migrations/SDK, Helm rollout (GCP; Helm-only) |
@@ -125,20 +125,22 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/ci-python-package.yml@v2.6.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/ci-python-package.yml@v2.6.8
     with:
       needs_pypi_auth: true
       uv_index_prefix: EXTENSIBILITY_AI
       github_environment: staging
+      cloud: gcp
     secrets: inherit
 
   publish:
     permissions:
       id-token: write
       contents: read
-    uses: ExtensibilityAI/github-actions/.github/workflows/publish-python-package.yml@v2.6.0
+    uses: ExtensibilityAI/github-actions/.github/workflows/publish-python-package.yml@v2.6.8
     with:
       uv_index_prefix: EXTENSIBILITY_AI
+      cloud: gcp
     secrets: inherit
 ```
 
