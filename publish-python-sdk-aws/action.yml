@@ -47,7 +47,7 @@ runs:
       run: uv python install 3.11
 
     - name: Authenticate to CodeArtifact
-      uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.6.7
+      uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.6.8
       with:
         aws_role_arn: ${{ inputs.aws_role_arn }}
         aws_region: ${{ inputs.aws_region }}
@@ -99,7 +99,7 @@ runs:
         echo "domain=$DOMAIN" >> "$GITHUB_OUTPUT"
         echo "repo=$REPO" >> "$GITHUB_OUTPUT"
         echo "account=$ACCOUNT" >> "$GITHUB_OUTPUT"
-        echo "repository-url=https://${DOMAIN}-${ACCOUNT}.d.codeartifact.${REGION}.amazonaws.com/pypi/${DOMAIN}/${REPO}/" >> "$GITHUB_OUTPUT"
+        echo "repository-url=https://${DOMAIN}-${ACCOUNT}.d.codeartifact.${REGION}.amazonaws.com/pypi/${REPO}/" >> "$GITHUB_OUTPUT"
 
     - name: Fail if prod version already published
       if: inputs.deploy_env == 'prod'

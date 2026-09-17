@@ -30,6 +30,11 @@ on:
         type: string
         required: false
         default: ''
+      cloud:
+        description: gcp (Artifact Registry) or aws (CodeArtifact). Default gcp.
+        type: string
+        required: false
+        default: gcp
 
 jobs:
   set-env:
@@ -38,7 +43,7 @@ jobs:
       env: ${{ steps.env.outputs.env }}
       stack: ${{ steps.env.outputs.stack }}
     steps:
-      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.4.0
+      - uses: ExtensibilityAI/github-actions/set-deploy-env@v2.6.8
         id: env
         with:
           mode: package
@@ -59,19 +64,36 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - uses: ExtensibilityAI/github-actions/publish-python-sdk-aws@v2.6.8
+        if: inputs.cloud == 'aws'
+        with:
+          deploy_env: ${{ needs.set-env.outputs.env }}
+          working_directory: ${{ inputs.working_directory }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+          aws_role_arn: ${{ vars.PYPI_ROLE_ARN || vars.AWS_ROLE_ARN }}
+          aws_region: ${{ vars.AWS_REGION }}
+          aws_account_id: ${{ vars.AWS_ACCOUNT_ID }}
+          codeartifact_domain: ${{ vars.CODEARTIFACT_DOMAIN }}
+          codeartifact_repo: ${{ vars.CODEARTIFACT_REPOSITORY || 'pypi' }}
+          codeartifact_domain_owner: ${{ vars.CODEARTIFACT_DOMAIN_OWNER }}
+
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+        if: inputs.cloud != 'aws'
 
       - name: Set up Python
+        if: inputs.cloud != 'aws'
         run: uv python install ${{ inputs.python_version }}
 
       - name: Authenticate to GCP for PyPI publish
-        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.4.0
+        if: inputs.cloud != 'aws'
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.6.8
         with:
           wif_provider: ${{ vars.WIF_PROVIDER }}
           pypi_sa: ${{ vars.PYPI_SA }}
           uv_index_prefix: ${{ inputs.uv_index_prefix }}
 
       - name: Resolve package version
+        if: inputs.cloud != 'aws'
         env:
           DEPLOY_ENV: ${{ needs.set-env.outputs.env }}
           PYPROJECT: ${{ inputs.pyproject_path }}
@@ -88,7 +110,7 @@ jobs:
           echo "PACKAGE_VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Fail if prod version already published
-        if: needs.set-env.outputs.env == 'prod'
+        if: ${{ needs.set-env.outputs.env == 'prod' && inputs.cloud != 'aws' }}
         run: |
           set -euo pipefail
           if gcloud artifacts versions describe "$PACKAGE_VERSION" \
@@ -103,16 +125,19 @@ jobs:
           echo "Version $PACKAGE_VERSION is not published yet; proceeding."
 
       - name: Set package version
+        if: inputs.cloud != 'aws'
         env:
           PYPROJECT: ${{ inputs.pyproject_path }}
         run: sed -i "s/^version = .*/version = \"$PACKAGE_VERSION\"/" "$PYPROJECT"
 
       - name: Build package
+        if: inputs.cloud != 'aws'
         run: |
           uv sync --extra dev
           uv build
 
       - name: Publish to Artifact Registry PyPI
+        if: inputs.cloud != 'aws'
         run: |
           uv sync --extra publish
           uv run twine upload --repository-url \
