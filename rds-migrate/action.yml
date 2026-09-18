@@ -26,9 +26,9 @@ inputs:
     description: Full ECR image reference (registry/repo:tag)
     required: true
   migration_command:
-    description: Shell command run in the Job container
+    description: Shell command run in the Job container (TAG images: alembic on PATH, not uv run)
     required: false
-    default: uv run alembic upgrade head
+    default: alembic upgrade head
   service_account:
     description: Kubernetes ServiceAccount name (WI-bound app SA)
     required: false
