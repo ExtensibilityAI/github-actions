@@ -32,7 +32,7 @@ Centralize CI/CD patterns (GCP GKE/Helm and AWS EKS/Helm deploy, package publish
 
 - Semver tags: `vMAJOR.MINOR.PATCH` (annotated)
 - Moving major tag: `v2` points at the latest `v2.x.y`
-- Callers: `ExtensibilityAI/github-actions/<action>@v2.6.8` or reusable workflow path `@v2.6.8` (`cloud: aws` on python CI/publish; CodeArtifact twine URL `/pypi/{repo}/`; `CODEARTIFACT_DOMAIN_OWNER` + fail-closed app-stack auth; required `uv_index_prefix`; multiline `migration_extra_env`; Helm-native deploy; DIY secrets sync for GCS **and** S3; AWS `drop-assume-role` via root `infra` CLI). Older pins: `@v2.6.7` for CodeArtifact domain-owner without python `cloud`; `@v2.6.6` for assume-role CLI without domain-owner; `@v2.6.5` for S3 DIY sync without the assume-role CLI fix; `@v2.6.0`–`@v2.6.4` for Helm-native without S3 sync; `@v2.5.0` for Helm-native without required prefix; `@v2.4.0` for Helm-only without multiline migrate. **Pulumi DIY backends** require GitHub environment variable `PULUMI_BACKEND_URL` (`gs://…` or `s3://…`).
+- Callers: `ExtensibilityAI/github-actions/<action>@v2.6.9` or reusable workflow path `@v2.6.9` (EKS `rds-migrate` default `alembic upgrade head` for TAG images with `PATH` + `PYTHONPATH`, not `uv run`; `cloud: aws` on python CI/publish; CodeArtifact twine URL `/pypi/{repo}/`; `CODEARTIFACT_DOMAIN_OWNER` + fail-closed app-stack auth; required `uv_index_prefix`; multiline `migration_extra_env`; Helm-native deploy; DIY secrets sync for GCS **and** S3; AWS `drop-assume-role` via root `infra` CLI). Older pins: `@v2.6.8` still uses `uv run alembic` in the migrate Job; `@v2.6.7` for CodeArtifact domain-owner without python `cloud`; `@v2.6.6` for assume-role CLI without domain-owner; `@v2.6.5` for S3 DIY sync without the assume-role CLI fix; `@v2.6.0`–`@v2.6.4` for Helm-native without S3 sync; `@v2.5.0` for Helm-native without required prefix; `@v2.4.0` for Helm-only without multiline migrate. **Pulumi DIY backends** require GitHub environment variable `PULUMI_BACKEND_URL` (`gs://…` or `s3://…`).
 - **`uv_index_prefix` is required** on reusable workflows that authenticate to a private uv index (no default). Pass the deployment-specific prefix that matches `[[tool.uv.index]]` (hyphens→underscores, without trailing `_PYPI`), e.g. `EXT_STORE_INFRA_3320` for index `ext-store-infra-3320-pypi`.
 
 Release via Actions → **Release** → `workflow_dispatch` with version input (from `main` or `trunk`). The job runs in the GitHub Environment **`release`** — configure required reviewers on that environment before cutting tags.
@@ -204,7 +204,7 @@ jobs:
     secrets: inherit
 ```
 
-**RDS migrations** run as an EKS Job (`rds-migrate`) using the just-built image, ConfigMap `app-env`, and Secret `db` (created by the app Pulumi stack). GitHub-hosted runners cannot reach VPC-private RDS directly.
+**RDS migrations** run as an EKS Job (`rds-migrate`) using the just-built image, ConfigMap `app-env`, and Secret `db` (created by the app Pulumi stack). GitHub-hosted runners cannot reach VPC-private RDS directly. The default Job command is `alembic upgrade head` (image `PATH` must include `.venv/bin` and `PYTHONPATH` must include the app). Override `migration_command` if needed; do not use `uv run` on `--no-install-project` images (it tries to write `*.egg-info` as a non-root user).
 
 **SDK publish** uses `publish-python-sdk-aws` → CodeArtifact. Ensure `infra-gh` (or `codeartifact.publisherPrincipals`) can `PublishPackageVersion`.
 
