@@ -275,7 +275,7 @@ jobs:
           REF="${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/${PREFIX}/${NAME}:${SHA}"
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
-      - uses: ExtensibilityAI/github-actions/rds-migrate@v2.6.9
+      - uses: ExtensibilityAI/github-actions/rds-migrate@v2.6.10
         with:
           aws_role_arn: ${{ vars.AWS_ROLE_ARN }}
           aws_region: ${{ vars.AWS_REGION }}
