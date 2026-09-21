@@ -139,7 +139,9 @@ runs:
         fi
 
         mapfile -t SET_ARGS < <(python3 <<'PY'
-        import json, os
+        import json, os, sys
+        sys.path.insert(0, os.environ["GITHUB_ACTION_PATH"])
+        from artifacts import artifacts_destination
         registry = os.environ["REGISTRY"]
         sha = os.environ["SHA"]
         images_raw = os.environ.get("IMAGES_JSON", "").strip()
@@ -190,8 +192,9 @@ runs:
         if hostname:
             args.append(f"server.value_options.allowed_hosts={hostname}")
         if artifacts:
-            dest = artifacts if artifacts.startswith("gs://") or artifacts.startswith("s3://") else f"gs://{artifacts}"
-            args.append(f"mlflow.artifactsDestination={dest}")
+            dest = artifacts_destination(artifacts, os.environ.get("CLOUD", "gcp"))
+            if dest:
+                args.append(f"mlflow.artifactsDestination={dest}")
 
         for a in args:
             print(a)
