@@ -320,7 +320,7 @@ jobs:
             --region "${{ vars.EKS_REGION || vars.AWS_REGION }}"
 
       - name: Helm rollout
-        uses: ExtensibilityAI/github-actions/helm-rollout@v2.4.0
+        uses: ExtensibilityAI/github-actions/helm-rollout@v2.6.11
         with:
           helm_chart: ${{ inputs.helm_chart }}
           helm_chart_version: ${{ inputs.helm_chart_version }}
