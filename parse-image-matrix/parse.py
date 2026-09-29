@@ -1,8 +1,8 @@
 """Validate and normalize the image specs for deploy-gke-app / deploy-eks-app.
 
-Reads ``IMAGES_JSON`` (inline JSON) or ``IMAGES_FILE`` (path to a JSON file in the
-checkout); exactly one must be set. Writes ``matrix``, ``count`` and ``first_name``
-to ``$GITHUB_OUTPUT``.
+Reads ``IMAGES_JSON`` (inline JSON) or ``IMAGES_FILE`` (comma-separated paths and
+globs of JSON files in the checkout); exactly one must be set. Writes ``matrix``,
+``count`` and ``first_name`` to ``$GITHUB_OUTPUT``.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 DNS_LABEL_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 # Dotted Helm path; no characters with meaning to --set (',', '=', '[', '\\', ...).
 VALUES_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$")
+GLOB_CHARS = "*?["
 
 
 class ImageSpecError(ValueError):
@@ -38,26 +39,57 @@ def _check_path(field: str, value: Any) -> None:
         raise ImageSpecError(f"{field} must be a relative path")
 
 
-def load_images(images_json: str, images_file: str, *, root: Path = Path(".")) -> Any:
-    """Return the parsed images array from exactly one of the two sources."""
-    images_json = images_json.strip()
-    images_file = images_file.strip()
-    if images_json and images_file:
-        raise ImageSpecError("set only one of images and images_file")
-    if images_file:
-        _check_path("images_file", images_file)
-        path = root / images_file
-        if not path.is_file():
-            raise ImageSpecError(f"images_file {images_file!r} does not exist")
-        raw, source = path.read_text(encoding="utf-8"), f"images_file {images_file!r}"
-    elif images_json:
-        raw, source = images_json, "images"
-    else:
-        raise ImageSpecError("one of images or images_file is required")
+def _parse_json(raw: str, source: str) -> Any:
     try:
         return json.loads(raw)
     except json.JSONDecodeError as e:
         raise ImageSpecError(f"{source} is not valid JSON: {e}") from None
+
+
+def _image_files(images_file: str, root: Path) -> list[str]:
+    """Expand the comma-separated paths and globs, in list order.
+
+    A plain path must exist. A glob may match nothing (a project may have no workers);
+    its matches are sorted.
+    """
+    files: list[str] = []
+    for entry in (e.strip() for e in images_file.split(",")):
+        if not entry:
+            continue
+        _check_path("images_file", entry)
+        if not any(c in entry for c in GLOB_CHARS):
+            if not (root / entry).is_file():
+                raise ImageSpecError(f"images_file {entry!r} does not exist")
+            files.append(entry)
+            continue
+        for match in sorted(p.relative_to(root).as_posix() for p in root.glob(entry)):
+            _check_path("images_file", match)
+            if (root / match).is_file():
+                files.append(match)
+    return files
+
+
+def load_images(images_json: str, images_file: str, *, root: Path = Path(".")) -> Any:
+    """Return the parsed images array from exactly one of the two sources.
+
+    ``images_file`` may list several paths and globs; their arrays are concatenated.
+    """
+    images_json = images_json.strip()
+    images_file = images_file.strip()
+    if images_json and images_file:
+        raise ImageSpecError("set only one of images and images_file")
+    if images_json:
+        return _parse_json(images_json, "images")
+    if not images_file:
+        raise ImageSpecError("one of images or images_file is required")
+    images: list[Any] = []
+    for path in _image_files(images_file, root):
+        source = f"images_file {path!r}"
+        data = _parse_json((root / path).read_text(encoding="utf-8"), source)
+        if not isinstance(data, list):
+            raise ImageSpecError(f"{source} must hold a JSON array")
+        images.extend(data)
+    return images
 
 
 def normalize(images: Any) -> list[dict[str, str]]:
@@ -65,6 +97,7 @@ def normalize(images: Any) -> list[dict[str, str]]:
     if not isinstance(images, list) or not images:
         raise ImageSpecError("images must be a non-empty JSON array")
     out = []
+    seen: set[str] = set()
     for i, item in enumerate(images):
         if not isinstance(item, dict):
             raise ImageSpecError(f"images[{i}] must be an object")
@@ -73,6 +106,9 @@ def normalize(images: Any) -> list[dict[str, str]]:
             raise ImageSpecError(f"images[{i}].name is required")
         if "/" in name or ".." in name:
             raise ImageSpecError(f"images[{i}].name must not contain '/' or '..'")
+        if name in seen:
+            raise ImageSpecError(f"images[{i}].name {name!r} is used by more than one image")
+        seen.add(name)
         role = item.get("role") or ""
         if role and not DNS_LABEL_RE.fullmatch(role):
             raise ImageSpecError(

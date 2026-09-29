@@ -15,8 +15,17 @@ on:
         default: ''
       images_file:
         description: >
-          Path (relative to the repo root) of a JSON file with the same array as
-          images, e.g. .github/images.json. Set this or images.
+          Comma-separated paths and globs (relative to the repo root) of JSON files,
+          each with an array like images, e.g.
+          .github/images.json,workers/*/deploy/image.json. Set this or images.
+        type: string
+        required: false
+        default: ''
+      values_files:
+        description: >
+          Comma-separated Helm values files for the rollout, in order; entries may be
+          globs, e.g. chart/values.yaml,workers/*/deploy/values.yaml. Empty keeps the
+          default (chart/values.yaml if present).
         type: string
         required: false
         default: ''
@@ -120,7 +129,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ExtensibilityAI/github-actions/parse-image-matrix@v2.7.0
+      - uses: ExtensibilityAI/github-actions/parse-image-matrix@v2.8.0
         id: images
         with:
           images: ${{ inputs.images }}
@@ -330,7 +339,7 @@ jobs:
             --region "${{ vars.EKS_REGION || vars.AWS_REGION }}"
 
       - name: Helm rollout
-        uses: ExtensibilityAI/github-actions/helm-rollout@v2.7.0
+        uses: ExtensibilityAI/github-actions/helm-rollout@v2.8.0
         with:
           helm_chart: ${{ inputs.helm_chart }}
           helm_chart_version: ${{ inputs.helm_chart_version }}
@@ -340,6 +349,7 @@ jobs:
           helm_repo_name: ${{ inputs.helm_repo_name }}
           helm_repo_url: ${{ inputs.helm_repo_url }}
           helm_release_var: ${{ vars.HELM_RELEASE }}
+          values_files: ${{ inputs.values_files }}
           cloud: aws
           image_registry: ${{ vars.IMAGE_REGISTRY }}
           aws_account_id: ${{ vars.AWS_ACCOUNT_ID }}

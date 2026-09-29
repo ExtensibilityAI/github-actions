@@ -32,7 +32,7 @@ Centralize CI/CD patterns (GCP GKE/Helm and AWS EKS/Helm deploy, package publish
 
 - Semver tags: `vMAJOR.MINOR.PATCH` (annotated)
 - Moving major tag: `v2` points at the latest `v2.x.y`
-- Callers: `ExtensibilityAI/github-actions/<action>@v2.7.0` or reusable workflow path `@v2.7.0` (per-image `values_key` and `images_file` on deploy-gke-app / deploy-eks-app; `helm-rollout` prefixes a bare `ARTIFACTS_BUCKET` with `s3://` when `cloud: aws`, otherwise `gs://`; EKS `rds-migrate` default `alembic upgrade head` for TAG images with `PATH` + `PYTHONPATH`, not `uv run`; `cloud: aws` on python CI/publish; CodeArtifact twine URL `/pypi/{repo}/`; `CODEARTIFACT_DOMAIN_OWNER` + fail-closed app-stack auth; required `uv_index_prefix`; multiline `migration_extra_env`; Helm-native deploy; DIY secrets sync for GCS **and** S3; AWS `drop-assume-role` via root `infra` CLI). Older pins: `@v2.6.11` has no `values_key` / `images_file`; `@v2.6.10` still prefixes bare `ARTIFACTS_BUCKET` with `gs://`; `@v2.6.8` still uses `uv run alembic` in the migrate Job; `@v2.6.7` for CodeArtifact domain-owner without python `cloud`; `@v2.6.6` for assume-role CLI without domain-owner; `@v2.6.5` for S3 DIY sync without the assume-role CLI fix; `@v2.6.0`–`@v2.6.4` for Helm-native without S3 sync; `@v2.5.0` for Helm-native without required prefix; `@v2.4.0` for Helm-only without multiline migrate. **Pulumi DIY backends** require GitHub environment variable `PULUMI_BACKEND_URL` (`gs://…` or `s3://…`).
+- Callers: `ExtensibilityAI/github-actions/<action>@v2.8.0` or reusable workflow path `@v2.8.0` (`images_file` and `values_files` take comma-separated lists and globs, e.g. `workers/*/deploy/image.json`, and duplicate image names fail; `values_files` input on deploy-gke-app / deploy-eks-app; per-image `values_key` and `images_file` on deploy-gke-app / deploy-eks-app; `helm-rollout` prefixes a bare `ARTIFACTS_BUCKET` with `s3://` when `cloud: aws`, otherwise `gs://`; EKS `rds-migrate` default `alembic upgrade head` for TAG images with `PATH` + `PYTHONPATH`, not `uv run`; `cloud: aws` on python CI/publish; CodeArtifact twine URL `/pypi/{repo}/`; `CODEARTIFACT_DOMAIN_OWNER` + fail-closed app-stack auth; required `uv_index_prefix`; multiline `migration_extra_env`; Helm-native deploy; DIY secrets sync for GCS **and** S3; AWS `drop-assume-role` via root `infra` CLI). Older pins: `@v2.7.0` takes a single `images_file` path and no `values_files` on the deploy workflows; `@v2.6.11` has no `values_key` / `images_file`; `@v2.6.10` still prefixes bare `ARTIFACTS_BUCKET` with `gs://`; `@v2.6.8` still uses `uv run alembic` in the migrate Job; `@v2.6.7` for CodeArtifact domain-owner without python `cloud`; `@v2.6.6` for assume-role CLI without domain-owner; `@v2.6.5` for S3 DIY sync without the assume-role CLI fix; `@v2.6.0`–`@v2.6.4` for Helm-native without S3 sync; `@v2.5.0` for Helm-native without required prefix; `@v2.4.0` for Helm-only without multiline migrate. **Pulumi DIY backends** require GitHub environment variable `PULUMI_BACKEND_URL` (`gs://…` or `s3://…`).
 - **`uv_index_prefix` is required** on reusable workflows that authenticate to a private uv index (no default). Pass the deployment-specific prefix that matches `[[tool.uv.index]]` (hyphens→underscores, without trailing `_PYPI`), e.g. `EXT_STORE_INFRA_3320` for index `ext-store-infra-3320-pypi`.
 
 Release via Actions → **Release** → `workflow_dispatch` with version input (from `main` or `trunk`). The job runs in the GitHub Environment **`release`** — configure required reviewers on that environment before cutting tags.
@@ -178,6 +178,19 @@ sets `workers.billing.image.repository` / `.tag` (from `@v2.7.0`).
 
 **Image list in a file.** Instead of `images`, pass `images_file: .github/images.json`
 (a JSON file with the same array) so tools can edit the list as plain JSON (from `@v2.7.0`).
+
+**Workers found by glob.** `images_file` and `values_files` take comma-separated paths
+and globs (from `@v2.8.0`), so a project picks up self-contained worker directories
+without editing a shared file:
+
+```yaml
+      images_file: .github/images.json,workers/*/deploy/image.json
+      values_files: chart/values.yaml,workers/*/deploy/values.yaml
+```
+
+Arrays and values files are used in list order, each glob's matches sorted; a glob that
+matches nothing is fine. Image names must be unique across all files.
+
 Product-specific migrate env (scaffolder only) belongs in the **caller** as a
 `secrets:` mapping (cannot use `secrets: inherit` in the same job when passing an
 explicit secret). Vars may be interpolated into the secret value. Multiline

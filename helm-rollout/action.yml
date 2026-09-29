@@ -39,7 +39,10 @@ inputs:
     required: false
     default: ''
   values_files:
-    description: Comma-separated -f values files (default chart/values.yaml if present)
+    description: >
+      Comma-separated -f values files, in order (default chart/values.yaml if
+      present). Entries may be globs (e.g. workers/*/deploy/values.yaml): matches are
+      sorted, and a glob that matches nothing is dropped.
     required: false
     default: ''
   cloud:
@@ -148,10 +151,9 @@ runs:
 
         FILE_ARGS=()
         if [ -n "${VALUES_FILES:-}" ]; then
-          IFS=',' read -ra FILES <<< "$VALUES_FILES"
-          for f in "${FILES[@]}"; do
-            f=$(echo "$f" | xargs)
-            [ -n "$f" ] && FILE_ARGS+=(-f "$f")
+          mapfile -t FILES < <(python3 "$GITHUB_ACTION_PATH/values_files.py" "$VALUES_FILES")
+          for f in "${FILES[@]+"${FILES[@]}"}"; do
+            FILE_ARGS+=(-f "$f")
           done
         elif [ -f chart/values.yaml ]; then
           FILE_ARGS+=(-f chart/values.yaml)

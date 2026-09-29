@@ -12,8 +12,10 @@ inputs:
     default: ''
   images_file:
     description: >
-      Path (relative to the checkout) of a JSON file holding the same array as
-      images. Set this or images.
+      Comma-separated paths and globs (relative to the checkout) of JSON files, each
+      holding an array like images; the arrays are concatenated in list order, each
+      glob's matches sorted. A glob may match nothing. Image names must be unique.
+      Set this or images.
     required: false
     default: ''
 
