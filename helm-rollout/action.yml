@@ -18,9 +18,10 @@ inputs:
     default: ''
   images_json:
     description: >
-      JSON array from parse-image-matrix. Each object may include name and role
-      (api|frontend|worker|app). When set, sets services.<role>.image.* (or
-      worker.image.* for role=worker).
+      JSON array from parse-image-matrix. An image with values_key sets
+      <values_key>.image.*. Otherwise the role is the image name's last '-'
+      segment: worker sets worker.image.*, anything else services.<role>.image.*
+      (plus image.* for api|app).
     required: false
     default: ''
   changed_by_name:
@@ -138,68 +139,7 @@ runs:
           fi
         fi
 
-        mapfile -t SET_ARGS < <(python3 <<'PY'
-        import json, os, sys
-        sys.path.insert(0, os.environ["GITHUB_ACTION_PATH"])
-        from artifacts import artifacts_destination
-        registry = os.environ["REGISTRY"]
-        sha = os.environ["SHA"]
-        images_raw = os.environ.get("IMAGES_JSON", "").strip()
-        changed_raw = os.environ.get("CHANGED_BY_NAME", "").strip()
-        suffix = os.environ.get("IMAGE_SUFFIX", "").strip()
-        hostname = os.environ.get("GATEWAY_HOSTNAME", "").strip()
-        artifacts = os.environ.get("ARTIFACTS_BUCKET", "").strip()
-        args = []
-        changed = None
-        if changed_raw:
-            try:
-                changed = json.loads(changed_raw)
-            except json.JSONDecodeError:
-                changed = None
-
-        def want(name: str) -> bool:
-            if changed is None:
-                return True
-            return bool(changed.get(name, True))
-
-        if images_raw and images_raw != "[]":
-            images = json.loads(images_raw)
-            for obj in images:
-                name = str(obj.get("name") or "").strip()
-                if not name or not want(name):
-                    continue
-                role = str(obj.get("role") or "").strip() or name.rsplit("-", 1)[-1]
-                image_repo = f"{registry}/{name}"
-                if role == "worker":
-                    args.append(f"worker.image.repository={image_repo}")
-                    args.append(f"worker.image.tag={sha}")
-                else:
-                    args.append(f"services.{role}.image.repository={image_repo}")
-                    args.append(f"services.{role}.image.tag={sha}")
-                    # OSS charts often use top-level image.*
-                    if role in ("api", "app"):
-                        args.append(f"image.repository={image_repo}")
-                        args.append(f"image.tag={sha}")
-        else:
-            if not suffix:
-                raise SystemExit("helm_image_repository_suffix or images_json required")
-            image_repo = f"{registry}/{suffix}"
-            args.append(f"image.repository={image_repo}")
-            args.append(f"image.tag={sha}")
-            args.append(f"services.api.image.repository={image_repo}")
-            args.append(f"services.api.image.tag={sha}")
-
-        if hostname:
-            args.append(f"server.value_options.allowed_hosts={hostname}")
-        if artifacts:
-            dest = artifacts_destination(artifacts, os.environ.get("CLOUD", "gcp"))
-            if dest:
-                args.append(f"mlflow.artifactsDestination={dest}")
-
-        for a in args:
-            print(a)
-        PY
-        )
+        mapfile -t SET_ARGS < <(python3 "$GITHUB_ACTION_PATH/set_args.py")
 
         HELM_SET=()
         for a in "${SET_ARGS[@]+"${SET_ARGS[@]}"}"; do
