@@ -114,3 +114,50 @@ def test_main_reports_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ca
     monkeypatch.setenv("IMAGES_JSON", "[]")
     assert main() == 1
     assert "::error::images must be a non-empty JSON array" in capsys.readouterr().err
+
+
+def _write(root: Path, rel: str, images: list) -> None:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(images))
+
+
+def test_load_file_list_and_globs(tmp_path: Path) -> None:
+    _write(tmp_path, ".github/images.json", [{"name": "a-api"}])
+    _write(tmp_path, "workers/etl/deploy/image.json", [{"name": "a-worker-etl"}])
+    _write(tmp_path, "workers/billing/deploy/image.json", [{"name": "a-worker-billing"}])
+    images = load_images(
+        "", ".github/images.json, workers/*/deploy/image.json", root=tmp_path
+    )
+    # List order, then each glob's matches sorted.
+    assert [i["name"] for i in images] == ["a-api", "a-worker-billing", "a-worker-etl"]
+
+
+def test_glob_matching_nothing_is_allowed(tmp_path: Path) -> None:
+    _write(tmp_path, ".github/images.json", [{"name": "a-api"}])
+    images = load_images("", ".github/images.json,workers/*/deploy/image.json", root=tmp_path)
+    assert images == [{"name": "a-api"}]
+
+
+def test_listed_file_must_hold_an_array(tmp_path: Path) -> None:
+    (tmp_path / "one.json").write_text('{"name": "a"}')
+    with pytest.raises(ImageSpecError, match="must hold a JSON array"):
+        load_images("", "one.json", root=tmp_path)
+
+
+def test_glob_path_checks(tmp_path: Path) -> None:
+    with pytest.raises(ImageSpecError, match="'..'"):
+        load_images("", "../*/image.json", root=tmp_path)
+    with pytest.raises(ImageSpecError, match="relative"):
+        load_images("", "/workers/*/image.json", root=tmp_path)
+
+
+def test_missing_plain_path_in_list(tmp_path: Path) -> None:
+    _write(tmp_path, ".github/images.json", [{"name": "a-api"}])
+    with pytest.raises(ImageSpecError, match="does not exist"):
+        load_images("", ".github/images.json,workers/etl/deploy/image.json", root=tmp_path)
+
+
+def test_duplicate_names_rejected() -> None:
+    with pytest.raises(ImageSpecError, match="more than one image"):
+        normalize([{"name": "a"}, {"name": "b"}, {"name": "a"}])
