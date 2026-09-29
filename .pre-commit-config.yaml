@@ -25,3 +25,9 @@ repos:
         language: script
         pass_filenames: false
         files: (^|/)?action\.yml$
+
+      - id: no-truncate
+        name: block emptied files
+        entry: scripts/pre-commit/no-truncate.sh
+        language: script
+        pass_filenames: false
