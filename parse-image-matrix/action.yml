@@ -3,11 +3,19 @@ description: >
   Validate and normalize a JSON array of container image specs for deploy-gke-app.
   Applies defaults for context, dockerfile, deployment, container, needs_pypi_auth,
   and build_secret_env. Optional role (Kubernetes DNS label) fills deployment/container.
+  Optional values_key (dotted Helm path) is passed through for helm-rollout.
 
 inputs:
   images:
-    description: JSON array of image objects (name required)
-    required: true
+    description: JSON array of image objects (name required). Set this or images_file.
+    required: false
+    default: ''
+  images_file:
+    description: >
+      Path (relative to the checkout) of a JSON file holding the same array as
+      images. Set this or images.
+    required: false
+    default: ''
 
 outputs:
   matrix:
@@ -27,83 +35,5 @@ runs:
       shell: bash
       env:
         IMAGES_JSON: ${{ inputs.images }}
-      run: |
-        set -euo pipefail
-        python3 <<'PY'
-        import json, os, re, sys
-
-        raw = os.environ.get("IMAGES_JSON", "").strip()
-        if not raw:
-            print("::error::images input is empty", file=sys.stderr)
-            sys.exit(1)
-        try:
-            images = json.loads(raw)
-        except json.JSONDecodeError as e:
-            print(f"::error::images is not valid JSON: {e}", file=sys.stderr)
-            sys.exit(1)
-        if not isinstance(images, list) or not images:
-            print("::error::images must be a non-empty JSON array", file=sys.stderr)
-            sys.exit(1)
-
-        role_defaults = {
-            "api": ("api", "api"),
-            "frontend": ("frontend", "frontend"),
-            "app": ("app", "app"),
-        }
-        key_re = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
-        dns_label_re = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
-
-        def bad(msg):
-            print(f"::error::{msg}", file=sys.stderr)
-            sys.exit(1)
-
-        def check_path(field, value):
-            if not isinstance(value, str) or not value:
-                bad(f"{field} must be a non-empty string")
-            if ".." in value.split("/"):
-                bad(f"{field} must not contain '..' segments")
-            if value.startswith("/"):
-                bad(f"{field} must be a relative path")
-
-        out = []
-        for i, item in enumerate(images):
-            if not isinstance(item, dict):
-                bad(f"images[{i}] must be an object")
-            name = item.get("name")
-            if not name or not isinstance(name, str):
-                bad(f"images[{i}].name is required")
-            if "/" in name or ".." in name:
-                bad(f"images[{i}].name must not contain '/' or '..'")
-            role = item.get("role") or ""
-            if role and not dns_label_re.fullmatch(role):
-                bad(
-                    f"images[{i}].role must be a Kubernetes DNS label "
-                    "(lowercase alphanumeric and hyphens) or empty"
-                )
-            context = item.get("context") or "."
-            dockerfile = item.get("dockerfile") or "Dockerfile"
-            check_path(f"images[{i}].context", context)
-            check_path(f"images[{i}].dockerfile", dockerfile)
-            build_secret_env = item.get("build_secret_env") or ""
-            if build_secret_env and not key_re.match(build_secret_env):
-                bad(f"images[{i}].build_secret_env must be an uppercase env var name")
-            dep, cont = role_defaults.get(role, (role or None, role or None))
-            entry = {
-                "name": name,
-                "context": item.get("context") or ".",
-                "dockerfile": item.get("dockerfile") or "Dockerfile",
-                "deployment": item.get("deployment") or dep or name,
-                "container": item.get("container") or cont or name,
-                "needs_pypi_auth": bool(item.get("needs_pypi_auth", False)),
-                "build_secret_env": item.get("build_secret_env") or "",
-            }
-            # matrix include needs stringy booleans for composite inputs sometimes
-            entry["needs_pypi_auth"] = "true" if entry["needs_pypi_auth"] else "false"
-            out.append(entry)
-
-        matrix = json.dumps(out, separators=(",", ":"))
-        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-            fh.write(f"matrix={matrix}\n")
-            fh.write(f"count={len(out)}\n")
-            fh.write(f"first_name={out[0]['name']}\n")
-        PY
+        IMAGES_FILE: ${{ inputs.images_file }}
+      run: python3 "$GITHUB_ACTION_PATH/parse.py"

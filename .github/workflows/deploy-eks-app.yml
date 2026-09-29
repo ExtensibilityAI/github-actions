@@ -7,10 +7,19 @@ on:
         description: >
           JSON array of image specs. Each object needs name; optional fields:
           dockerfile, context, role (Kubernetes DNS label, e.g. api|frontend|app),
-          deployment, container,
-          needs_pypi_auth, build_secret_env.
+          deployment, container, needs_pypi_auth, build_secret_env, and
+          values_key (dotted Helm path; helm-rollout sets <values_key>.image.*).
+          Set this or images_file.
         type: string
-        required: true
+        required: false
+        default: ''
+      images_file:
+        description: >
+          Path (relative to the repo root) of a JSON file with the same array as
+          images, e.g. .github/images.json. Set this or images.
+        type: string
+        required: false
+        default: ''
 
       uv_index_prefix:
         description: >
@@ -111,10 +120,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ExtensibilityAI/github-actions/parse-image-matrix@v2.4.0
+      - uses: ExtensibilityAI/github-actions/parse-image-matrix@v2.7.0
         id: images
         with:
           images: ${{ inputs.images }}
+          images_file: ${{ inputs.images_file }}
 
       - uses: ExtensibilityAI/github-actions/detect-path-changes@v2.4.0
         id: detect
@@ -320,7 +330,7 @@ jobs:
             --region "${{ vars.EKS_REGION || vars.AWS_REGION }}"
 
       - name: Helm rollout
-        uses: ExtensibilityAI/github-actions/helm-rollout@v2.6.11
+        uses: ExtensibilityAI/github-actions/helm-rollout@v2.7.0
         with:
           helm_chart: ${{ inputs.helm_chart }}
           helm_chart_version: ${{ inputs.helm_chart_version }}
