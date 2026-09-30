@@ -42,7 +42,10 @@ inputs:
     description: >
       Comma-separated -f values files, in order (default chart/values.yaml if
       present). Entries may be globs (e.g. workers/*/deploy/values.yaml): matches are
-      sorted, and a glob that matches nothing is dropped.
+      sorted, and a glob that matches nothing is dropped. When set, an upgrade of an
+      existing release drops each workers.<key> of the previous values that no values
+      file defines (a removed worker), then upgrades with --reset-values from the
+      pruned previous values; otherwise it uses --reuse-values.
     required: false
     default: ''
   cloud:
@@ -150,8 +153,20 @@ runs:
         done
 
         FILE_ARGS=()
+        # --reuse-values keeps the previous release's values (e.g. the image tags of
+        # images this deploy did not rebuild), but also keeps workers.<name> after a
+        # worker's values file is deleted. With values_files, prune those workers from
+        # the previous values and pass them first under --reset-values instead.
+        VALUES_MODE=(--reuse-values)
         if [ -n "${VALUES_FILES:-}" ]; then
           mapfile -t FILES < <(python3 "$GITHUB_ACTION_PATH/values_files.py" "$VALUES_FILES")
+          if helm status "$RELEASE_NAME" -n "$NS" >/dev/null 2>&1; then
+            PREVIOUS="${RUNNER_TEMP:-/tmp}/helm-rollout-previous-values.json"
+            helm get values "$RELEASE_NAME" -n "$NS" -o json > "$PREVIOUS.raw"
+            python3 "$GITHUB_ACTION_PATH/prune_workers.py" "$PREVIOUS.raw" \
+              "${FILES[@]+"${FILES[@]}"}" > "$PREVIOUS"
+            VALUES_MODE=(--reset-values -f "$PREVIOUS")
+          fi
           for f in "${FILES[@]+"${FILES[@]}"}"; do
             FILE_ARGS+=(-f "$f")
           done
@@ -183,7 +198,7 @@ runs:
         fi
 
         helm upgrade --install "$RELEASE_NAME" "$CHART" -n "$NS" \
-          --reuse-values \
+          "${VALUES_MODE[@]}" \
           "${FILE_ARGS[@]}" \
           "${VERSION_ARGS[@]}" \
           "${HELM_SET[@]}" \

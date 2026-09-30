@@ -129,7 +129,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: ExtensibilityAI/github-actions/parse-image-matrix@v2.8.0
+      - uses: ExtensibilityAI/github-actions/parse-image-matrix@v2.9.0
         id: images
         with:
           images: ${{ inputs.images }}
@@ -339,7 +339,7 @@ jobs:
             --region "${{ vars.EKS_REGION || vars.AWS_REGION }}"
 
       - name: Helm rollout
-        uses: ExtensibilityAI/github-actions/helm-rollout@v2.8.0
+        uses: ExtensibilityAI/github-actions/helm-rollout@v2.9.0
         with:
           helm_chart: ${{ inputs.helm_chart }}
           helm_chart_version: ${{ inputs.helm_chart_version }}
