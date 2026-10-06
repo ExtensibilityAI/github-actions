@@ -1,0 +1,96 @@
+name: Docs build
+
+# Reusable docs build for eai-infra-docs (public + optional internal).
+# Strict MkDocs build so broken cross-refs fail; public nav is allowlist-checked.
+on:
+  workflow_call:
+    inputs:
+      working_directory:
+        description: Docs repo root relative to checkout
+        type: string
+        required: false
+        default: .
+      python_version:
+        type: string
+        required: false
+        default: '3.11'
+      build:
+        description: Which site config to build (public | internal | both)
+        type: string
+        required: false
+        default: both
+      needs_pypi_auth:
+        description: Authenticate to private PyPI for internal package pins
+        type: boolean
+        required: false
+        default: false
+      uv_index_prefix:
+        description: >
+          Prefix for UV_INDEX_<prefix>_PYPI_* credentials when needs_pypi_auth
+          is true. Must match [[tool.uv.index]] name with hyphens as underscores.
+        type: string
+        required: false
+        default: ''
+      github_environment:
+        description: GitHub Environment for private PyPI vars/secrets
+        type: string
+        required: false
+        default: staging
+      cloud:
+        description: gcp (Artifact Registry WIF) or aws (CodeArtifact OIDC)
+        type: string
+        required: false
+        default: gcp
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.needs_pypi_auth && inputs.github_environment || '' }}
+    permissions:
+      id-token: write
+      contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Set up Python
+        run: uv python install ${{ inputs.python_version }}
+
+      - name: Authenticate to PyPI (GCP)
+        if: ${{ inputs.needs_pypi_auth && inputs.cloud != 'aws' }}
+        uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.6.8
+        with:
+          wif_provider: ${{ vars.WIF_PROVIDER }}
+          pypi_sa: ${{ vars.PYPI_SA }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+
+      - name: Authenticate to CodeArtifact (AWS)
+        if: ${{ inputs.needs_pypi_auth && inputs.cloud == 'aws' }}
+        uses: ExtensibilityAI/github-actions/setup-codeartifact-auth@v2.6.8
+        with:
+          aws_role_arn: ${{ vars.PYPI_ROLE_ARN || vars.AWS_ROLE_ARN }}
+          aws_region: ${{ vars.AWS_REGION }}
+          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+          codeartifact_domain: ${{ vars.CODEARTIFACT_DOMAIN }}
+          codeartifact_repo: ${{ vars.CODEARTIFACT_REPOSITORY || 'pypi' }}
+          codeartifact_domain_owner: ${{ vars.CODEARTIFACT_DOMAIN_OWNER }}
+          required: 'true'
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Check public allowlist
+        if: ${{ inputs.build == 'public' || inputs.build == 'both' }}
+        run: uv run python scripts/check_public_allowlist.py
+
+      - name: Build public docs
+        if: ${{ inputs.build == 'public' || inputs.build == 'both' }}
+        run: uv run mkdocs build --strict -f mkdocs.public.yml
+
+      - name: Build internal docs
+        if: ${{ inputs.build == 'internal' || inputs.build == 'both' }}
+        run: uv run mkdocs build --strict -f mkdocs.internal.yml
