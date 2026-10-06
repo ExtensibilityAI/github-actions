@@ -1,0 +1,10 @@
+# actionlint 1.7.12 does not yet recognize the $/ self-repo reference
+# (same repository at the running commit). Keep using $/ in workflows so
+# reusable workflows resolve sibling actions in this repo, not the caller.
+paths:
+  .github/workflows/deploy-gke-app.yml:
+    ignore:
+      - 'specifying action "\$/k8s-migrate" in invalid format because ref is missing'
+  .github/workflows/deploy-eks-app.yml:
+    ignore:
+      - 'specifying action "\$/k8s-migrate" in invalid format because ref is missing'

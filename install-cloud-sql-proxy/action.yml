@@ -1,5 +1,8 @@
 name: Install Cloud SQL Auth Proxy
-description: Download a pinned Cloud SQL Auth Proxy binary and verify its SHA256 checksum.
+description: >
+  DEPRECATED — only used by cloud-sql-migrate. Prefer k8s-migrate (in-cluster
+  Job) over runner-side cloud-sql-proxy. Download a pinned Cloud SQL Auth Proxy
+  binary and verify its SHA256 checksum.
 inputs:
   version:
     description: Cloud SQL Auth Proxy version tag

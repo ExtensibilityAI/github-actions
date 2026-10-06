@@ -72,6 +72,20 @@ on:
         type: boolean
         required: false
         default: false
+      migration_image_name:
+        description: >
+          Image name under docker-images/ for the migrate Job (defaults to first
+          matrix image name). Usually the api/backend image.
+        type: string
+        required: false
+        default: ''
+      migration_service_account:
+        description: K8s ServiceAccount for the migrate Job
+        type: string
+        required: false
+        default: api
+      # Deprecated: ignored. Migrations run as an in-cluster Job (k8s-migrate)
+      # reading app-env + Secret db — no Secret Manager / public Cloud SQL proxy.
       db_secret_name_prefix:
         type: string
         required: false
@@ -271,19 +285,45 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: ExtensibilityAI/github-actions/cloud-sql-migrate@v2.5.0
+
+      - name: Resolve migration image
+        id: image
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          NAME: ${{ inputs.migration_image_name || needs.set-env.outputs.first_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NAME:-}" ]; then
+            echo "::error::migration image name is required (migration_image_name or first matrix image)"
+            exit 1
+          fi
+          if [ -n "${IMAGE_REGISTRY:-}" ]; then
+            REF="${IMAGE_REGISTRY}/${NAME}:${SHA}"
+          else
+            if [ -z "${PROJECT_ID:-}" ] || [ -z "${REGION:-}" ]; then
+              echo "::error::GCP_PROJECT_ID, GCP_REGION (or IMAGE_REGISTRY), and migration image name are required"
+              exit 1
+            fi
+            REF="${REGION}-docker.pkg.dev/${PROJECT_ID}/docker-images/${NAME}:${SHA}"
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      # $/ keeps this reusable workflow and k8s-migrate on the same ref.
+      - uses: $/k8s-migrate
         with:
-          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
-          gcp_region: ${{ vars.GCP_REGION || 'us-central1' }}
+          cloud: gcp
           wif_provider: ${{ vars.WIF_PROVIDER }}
           gcp_sa: ${{ vars.GCP_SA }}
-          pypi_sa: ${{ vars.PYPI_SA }}
-          uv_index_prefix: ${{ inputs.uv_index_prefix }}
+          gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
+          gke_cluster_name: ${{ vars.GKE_CLUSTER }}
+          gke_location: ${{ vars.GKE_REGION }}
           deploy_env: ${{ needs.set-env.outputs.env }}
-          db_secret_name_prefix: ${{ inputs.db_secret_name_prefix }}
-          db_user: ${{ inputs.db_user }}
-          db_name: ${{ inputs.db_name }}
-          instance_name_prefix: ${{ inputs.instance_name_prefix }}
+          k8s_namespace: ${{ vars.K8S_NAMESPACE }}
+          migration_image: ${{ steps.image.outputs.ref }}
+          service_account: ${{ inputs.migration_service_account }}
           extra_env: ${{ secrets.migration_extra_env }}
 
   deploy:
