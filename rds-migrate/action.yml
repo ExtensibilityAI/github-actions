@@ -140,6 +140,29 @@ runs:
                 },
             },
         ]
+        # Behind a PgBouncer pooler, app-env's DATABASE_HOST/PORT point at the pooler;
+        # migrations connect to the database directly (DATABASE_DIRECT_*).
+        cm_data = json.loads(
+            subprocess.run(
+                ["kubectl", "-n", ns, "get", "configmap", cm, "-o", "json"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        ).get("data") or {}
+        if cm_data.get("DATABASE_DIRECT_HOST"):
+            print("app-env has DATABASE_DIRECT_HOST: migrating against the database directly")
+            for name, key in (
+                ("DATABASE_HOST", "DATABASE_DIRECT_HOST"),
+                ("DATABASE_PORT", "DATABASE_DIRECT_PORT"),
+            ):
+                if cm_data.get(key):
+                    env_list.append(
+                        {
+                            "name": name,
+                            "valueFrom": {"configMapKeyRef": {"name": cm, "key": key}},
+                        }
+                    )
         if extra_file and pathlib.Path(extra_file).is_file():
             extra = json.loads(pathlib.Path(extra_file).read_text(encoding="utf-8"))
             for item in extra:
