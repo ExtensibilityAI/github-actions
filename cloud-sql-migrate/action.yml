@@ -1,9 +1,13 @@
 name: Cloud SQL migrate
 description: >
-  Fetch DB password from Secret Manager, start Cloud SQL Auth Proxy, run
-  alembic upgrade head. Optional opaque extra_env (KEY=VALUE lines, multiline
-  values allowed) is exported to GITHUB_ENV before migrate — callers expand
-  product-specific values there.
+  DEPRECATED — use k8s-migrate (cloud=gcp) instead. This action runs
+  cloud-sql-proxy on a GitHub-hosted runner and needs a Cloud SQL public IP.
+  Prefer an in-cluster Job via k8s-migrate so migrations reach the private IP
+  (and honour DATABASE_DIRECT_* behind a pooler). Kept for existing callers
+  until they bump deploy-gke-app. Fetch DB password from Secret Manager, start
+  Cloud SQL Auth Proxy, run alembic upgrade head. Optional opaque extra_env
+  (KEY=VALUE lines, multiline values allowed) is exported to GITHUB_ENV before
+  migrate — callers expand product-specific values there.
 
 inputs:
   gcp_project_id:
