@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Parse migration_extra_env blobs and apply them for k8s-migrate / cloud-sql-migrate.
+"""Parse migration_extra_env blobs and apply them for k8s-migrate / rds-migrate.
 
 Supports single-line ``KEY=VALUE`` and multiline values (e.g. PEMs expanded from
 GitHub secrets). Multiline values are written to ``GITHUB_ENV`` using heredoc
