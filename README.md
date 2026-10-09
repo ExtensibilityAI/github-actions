@@ -32,7 +32,7 @@ Centralize CI/CD patterns (GCP GKE/Helm and AWS EKS/Helm deploy, package publish
 
 - Semver tags: `vMAJOR.MINOR.PATCH` (annotated)
 - Moving major tag: `v2` points at the latest `v2.x.y`
-- Callers: `ExtensibilityAI/github-actions/<action>@v2.9.3` or reusable workflow path `@v2.9.3` (`k8s-migrate` / `rds-migrate` connect directly to the database when ConfigMap `app-env` has `DATABASE_DIRECT_HOST`, which an app behind a PgBouncer pooler has; GKE migrations use the same in-cluster Job path via `k8s-migrate` instead of runner-side `cloud-sql-migrate`; `helm-rollout` pins Helm v4.3.0 and upgrades with `--server-side=false`, so a Deployment KEDA has scaled away from the chart's `replicas` no longer fails with a server-side-apply conflict; with `values_files`, `helm-rollout` drops a removed worker's `workers.<name>` from the release: it upgrades with `--reset-values` from the pruned previous values instead of `--reuse-values`; `images_file` and `values_files` take comma-separated lists and globs, e.g. `workers/*/deploy/image.json`, and duplicate image names fail; `values_files` input on deploy-gke-app / deploy-eks-app; per-image `values_key` and `images_file` on deploy-gke-app / deploy-eks-app; `helm-rollout` prefixes a bare `ARTIFACTS_BUCKET` with `s3://` when `cloud: aws`, otherwise `gs://`; EKS `rds-migrate` default `alembic upgrade head` for TAG images with `PATH` + `PYTHONPATH`, not `uv run`; `cloud: aws` on python CI/publish; CodeArtifact twine URL `/pypi/{repo}/`; `CODEARTIFACT_DOMAIN_OWNER` + fail-closed app-stack auth; required `uv_index_prefix`; multiline `migration_extra_env`; Helm-native deploy; DIY secrets sync for GCS **and** S3; AWS `drop-assume-role` via root `infra` CLI). Older pins: `@v2.9.3` and earlier use `cloud-sql-migrate` (runner + public Cloud SQL IP) on GKE; `@v2.9.2` migrates through `app-env`'s `DATABASE_HOST` even behind a pooler; `@v2.9.1` (its deploy workflows still call `helm-rollout@v2.9.0`), `@v2.9.0` and earlier install the latest Helm and use its default apply mode (server-side on Helm 4); `@v2.8.0` keeps a removed worker's values (and so its workload) under `--reuse-values`; `@v2.7.0` takes a single `images_file` path and no `values_files` on the deploy workflows; `@v2.6.11` has no `values_key` / `images_file`; `@v2.6.10` still prefixes bare `ARTIFACTS_BUCKET` with `gs://`; `@v2.6.8` still uses `uv run alembic` in the migrate Job; `@v2.6.7` for CodeArtifact domain-owner without python `cloud`; `@v2.6.6` for assume-role CLI without domain-owner; `@v2.6.5` for S3 DIY sync without the assume-role CLI fix; `@v2.6.0`–`@v2.6.4` for Helm-native without S3 sync; `@v2.5.0` for Helm-native without required prefix; `@v2.4.0` for Helm-only without multiline migrate. **Pulumi DIY backends** require GitHub environment variable `PULUMI_BACKEND_URL` (`gs://…` or `s3://…`).
+- Callers: `ExtensibilityAI/github-actions/<action>@v2.9.3` or reusable workflow path `@v2.9.3` (`k8s-migrate` / `rds-migrate` connect directly to the database when ConfigMap `app-env` has `DATABASE_DIRECT_HOST`, which an app behind a PgBouncer pooler has; GKE migrations use the in-cluster Job path via `k8s-migrate`; `helm-rollout` pins Helm v4.3.0 and upgrades with `--server-side=false`, so a Deployment KEDA has scaled away from the chart's `replicas` no longer fails with a server-side-apply conflict; with `values_files`, `helm-rollout` drops a removed worker's `workers.<name>` from the release: it upgrades with `--reset-values` from the pruned previous values instead of `--reuse-values`; `images_file` and `values_files` take comma-separated lists and globs, e.g. `workers/*/deploy/image.json`, and duplicate image names fail; `values_files` input on deploy-gke-app / deploy-eks-app; per-image `values_key` and `images_file` on deploy-gke-app / deploy-eks-app; `helm-rollout` prefixes a bare `ARTIFACTS_BUCKET` with `s3://` when `cloud: aws`, otherwise `gs://`; EKS `rds-migrate` default `alembic upgrade head` for TAG images with `PATH` + `PYTHONPATH`, not `uv run`; `cloud: aws` on python CI/publish; CodeArtifact twine URL `/pypi/{repo}/`; `CODEARTIFACT_DOMAIN_OWNER` + fail-closed app-stack auth; required `uv_index_prefix`; multiline `migration_extra_env`; Helm-native deploy; DIY secrets sync for GCS **and** S3; AWS `drop-assume-role` via root `infra` CLI). Older pins: `@v2.10.0` still ships deprecated `cloud-sql-migrate` / `install-cloud-sql-proxy` (removed afterward; use `k8s-migrate`); `@v2.9.3` and earlier use `cloud-sql-migrate` (runner + public Cloud SQL IP) on GKE; `@v2.9.2` migrates through `app-env`'s `DATABASE_HOST` even behind a pooler; `@v2.9.1` (its deploy workflows still call `helm-rollout@v2.9.0`), `@v2.9.0` and earlier install the latest Helm and use its default apply mode (server-side on Helm 4); `@v2.8.0` keeps a removed worker's values (and so its workload) under `--reuse-values`; `@v2.7.0` takes a single `images_file` path and no `values_files` on the deploy workflows; `@v2.6.11` has no `values_key` / `images_file`; `@v2.6.10` still prefixes bare `ARTIFACTS_BUCKET` with `gs://`; `@v2.6.8` still uses `uv run alembic` in the migrate Job; `@v2.6.7` for CodeArtifact domain-owner without python `cloud`; `@v2.6.6` for assume-role CLI without domain-owner; `@v2.6.5` for S3 DIY sync without the assume-role CLI fix; `@v2.6.0`–`@v2.6.4` for Helm-native without S3 sync; `@v2.5.0` for Helm-native without required prefix; `@v2.4.0` for Helm-only without multiline migrate. **Pulumi DIY backends** require GitHub environment variable `PULUMI_BACKEND_URL` (`gs://…` or `s3://…`).
 - **`uv_index_prefix` is required** on reusable workflows that authenticate to a private uv index (no default). Pass the deployment-specific prefix that matches `[[tool.uv.index]]` (hyphens→underscores, without trailing `_PYPI`), e.g. `EXT_STORE_INFRA_3320` for index `ext-store-infra-3320-pypi`.
 
 Release via Actions → **Release** → `workflow_dispatch` with version input (from `main` or `trunk`). The job runs in the GitHub Environment **`release`** — configure required reviewers on that environment before cutting tags.
@@ -61,7 +61,6 @@ Release via Actions → **Release** → `workflow_dispatch` with version input (
 | `aws-actions/configure-aws-credentials` | `# v4` → `7474bc4690e29a8392af63c5b98e7449536d5c3a` |
 | `aws-actions/amazon-ecr-login` | `# v2` → `03f1aad4c6c7ffd436567f42f9384779290529bd` |
 
-Cloud SQL Auth Proxy: `v2.14.2` (checksum pinned in `install-cloud-sql-proxy`; deprecated with `cloud-sql-migrate` — prefer `k8s-migrate`).  
 actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`). Local mirror: `pre-commit install` then `pre-commit run --all-files` (see `.pre-commit-config.yaml`).
 
 ## Composite actions
@@ -75,12 +74,10 @@ actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`). Lo
 | `detect-changes` | `uv run infra utils detect-changes` (platform → apps deploy order) |
 | `detect-path-changes` | Git diff whether a directory prefix changed |
 | `parse-image-matrix` | Normalize JSON image list for deploy matrix |
-| `install-cloud-sql-proxy` | **Deprecated** — only used by `cloud-sql-migrate`. Prefer `k8s-migrate`. Download + SHA256 verify proxy to `/usr/local/bin` |
 | `set-deploy-env` | Resolve `env` / `stack`: PR→staging, push/tag→prod, dispatch→input |
 | `docker-build-push` | WIF build/push with `:latest` cache and change detection (GAR) |
 | `docker-build-push-aws` | OIDC + ECR login, build/push with `:latest` cache and change detection |
 | `k8s-migrate` | In-cluster Job alembic (`cloud: gcp\|aws`); ConfigMap `app-env` + Secret `db`; prefers `DATABASE_DIRECT_HOST`/`PORT` when set (pooler-safe), else `DATABASE_HOST`/`PORT` |
-| `cloud-sql-migrate` | **Deprecated** — use `k8s-migrate` (`cloud: gcp`). Runner-side Secret Manager + Cloud SQL Auth Proxy + alembic (needs public IP) |
 | `rds-migrate` | Thin wrapper around `k8s-migrate` with `cloud: aws` (same Job / `DATABASE_DIRECT_*` behaviour) |
 | `publish-python-sdk` | Version rewrite + twine to Artifact Registry PyPI |
 | `publish-python-sdk-aws` | Version rewrite + twine to CodeArtifact PyPI |
@@ -169,7 +166,7 @@ jobs:
 
 Deploy is **Helm-only** (no `deploy_method` / kubectl). Pass `helm_chart` (local `./chart` or upstream).
 
-**Migrations** run as an in-cluster Kubernetes Job (`k8s-migrate` with `cloud: gcp`) using the just-built image, ConfigMap `app-env`, and Secret `db` (created by the app Pulumi stack). Prefer this over the deprecated `cloud-sql-migrate` (runner + Cloud SQL Auth Proxy), which needs a public IP.
+**Migrations** run as an in-cluster Kubernetes Job (`k8s-migrate` with `cloud: gcp`) using the just-built image, ConfigMap `app-env`, and Secret `db` (created by the app Pulumi stack).
 
 When `cloud.db.pooler` is enabled, `app-env` sets `DATABASE_HOST`/`DATABASE_PORT` to PgBouncer and `DATABASE_DIRECT_HOST`/`DATABASE_DIRECT_PORT` to the database. `k8s-migrate` prefers `DATABASE_DIRECT_*` when present so alembic bypasses the pooler; otherwise it uses `DATABASE_HOST`/`PORT` from `envFrom`.
 
@@ -206,8 +203,7 @@ Product-specific migrate env (scaffolder only) belongs in the **caller** as a
 `secrets:` mapping (cannot use `secrets: inherit` in the same job when passing an
 explicit secret). Vars may be interpolated into the secret value. Multiline
 secrets (PEMs) may span lines after `KEY=`; `k8s-migrate` / `rds-migrate`
-(and deprecated `cloud-sql-migrate`) write them via GITHUB_ENV heredocs or JSON
-Job env:
+write them via GITHUB_ENV heredocs or JSON Job env:
 
 ```yaml
     secrets:
