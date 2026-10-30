@@ -5,7 +5,7 @@ description: |
 
 inputs:
   image_name:
-    description: Image name in Artifact Registry docker-images repo (e.g. lims-api)
+    description: Image name under the Artifact Registry repository (e.g. lims-api)
     required: true
   context:
     description: Docker build context path
@@ -21,6 +21,13 @@ inputs:
   gcp_region:
     description: GCP region for Artifact Registry
     required: true
+  image_registry:
+    description: >
+      Full registry prefix (e.g. us-central1-docker.pkg.dev/proj/docker-images or
+      us-central1-docker.pkg.dev/proj/dagster-platform). Empty uses
+      {region}-docker.pkg.dev/{project}/docker-images.
+    required: false
+    default: ''
   wif_provider:
     description: Workload Identity Federation provider
     required: true
@@ -81,30 +88,42 @@ runs:
         REGION: ${{ inputs.gcp_region }}
       run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
-    - name: Pull previous image for cache
+    - name: Resolve registry prefix
+      id: registry
       shell: bash
       env:
         REGION: ${{ inputs.gcp_region }}
         PROJECT_ID: ${{ inputs.gcp_project_id }}
+        IMAGE_REGISTRY: ${{ inputs.image_registry }}
+      run: |
+        set -euo pipefail
+        if [ -n "${IMAGE_REGISTRY:-}" ]; then
+          REGISTRY="${IMAGE_REGISTRY}"
+        else
+          REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/docker-images"
+        fi
+        echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
+
+    - name: Pull previous image for cache
+      shell: bash
+      env:
+        REGISTRY: ${{ steps.registry.outputs.registry }}
         IMAGE_NAME: ${{ inputs.image_name }}
       run: |
         set -euo pipefail
-        REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/docker-images"
         docker pull "${REGISTRY}/${IMAGE_NAME}:latest" 2>/dev/null || true
 
     - name: Build image
       id: build
       shell: bash
       env:
-        REGION: ${{ inputs.gcp_region }}
-        PROJECT_ID: ${{ inputs.gcp_project_id }}
+        REGISTRY: ${{ steps.registry.outputs.registry }}
         IMAGE_NAME: ${{ inputs.image_name }}
         CONTEXT: ${{ inputs.context }}
         DOCKERFILE: ${{ inputs.dockerfile }}
         BUILD_SECRET_ENV: ${{ inputs.build_secret_env }}
       run: |
         set -euo pipefail
-        REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/docker-images"
         SECRET_ARGS=()
         if [ -n "${BUILD_SECRET_ENV:-}" ]; then
           SECRET_ARGS+=(--secret "id=uv_pypi_password,env=${BUILD_SECRET_ENV}")
@@ -130,14 +149,12 @@ runs:
       id: push
       shell: bash
       env:
-        REGION: ${{ inputs.gcp_region }}
-        PROJECT_ID: ${{ inputs.gcp_project_id }}
+        REGISTRY: ${{ steps.registry.outputs.registry }}
         IMAGE_NAME: ${{ inputs.image_name }}
         UNCHANGED: ${{ steps.build.outputs.unchanged }}
         SHA: ${{ github.sha }}
       run: |
         set -euo pipefail
-        REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/docker-images"
         REF="${REGISTRY}/${IMAGE_NAME}:${SHA}"
         echo "image_ref=$REF" >> "$GITHUB_OUTPUT"
         if [ "$UNCHANGED" = "true" ]; then

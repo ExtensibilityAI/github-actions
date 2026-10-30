@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from set_args import extra_set_args, image_set_args
+from set_args import extra_set_args, image_set_args, parse_extra_helm_sets
 
 REG = "us-central1-docker.pkg.dev/proj/docker-images"
 
@@ -87,3 +87,10 @@ def test_extra_set_args() -> None:
         "server.value_options.allowed_hosts=h.example",
         "mlflow.artifactsDestination=s3://bkt",
     ]
+
+
+def test_parse_extra_helm_sets() -> None:
+    assert parse_extra_helm_sets("") == []
+    assert parse_extra_helm_sets("a.b=c\n# skip\n\nd=e") == ["a.b=c", "d=e"]
+    with pytest.raises(SystemExit):
+        parse_extra_helm_sets("not-a-pair")

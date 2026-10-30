@@ -5,6 +5,8 @@ paths:
   .github/workflows/deploy-gke-app.yml:
     ignore:
       - 'specifying action "\$/k8s-migrate" in invalid format because ref is missing'
+      - 'specifying action "\$/docker-build-push" in invalid format because ref is missing'
+      - 'specifying action "\$/helm-rollout" in invalid format because ref is missing'
   .github/workflows/deploy-eks-app.yml:
     ignore:
       - 'specifying action "\$/k8s-migrate" in invalid format because ref is missing'

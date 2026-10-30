@@ -180,7 +180,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: ExtensibilityAI/github-actions/docker-build-push@v2.4.0
+      # $/ keeps this reusable workflow and docker-build-push on the same ref.
+      - uses: $/docker-build-push
         id: build
         with:
           image_name: ${{ matrix.name }}
@@ -188,6 +189,9 @@ jobs:
           dockerfile: ${{ matrix.dockerfile }}
           gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
           gcp_region: ${{ vars.GCP_REGION || 'us-central1' }}
+          # Prefer IMAGE_REGISTRY; ARTIFACT_REGISTRY_IMAGE is the same prefix when
+          # infra provisions a dedicated Docker AR repo for the app.
+          image_registry: ${{ vars.IMAGE_REGISTRY || vars.ARTIFACT_REGISTRY_IMAGE }}
           wif_provider: ${{ vars.WIF_PROVIDER }}
           gcp_sa: ${{ vars.GCP_SA }}
           needs_pypi_auth: ${{ matrix.needs_pypi_auth }}
@@ -291,7 +295,7 @@ jobs:
         env:
           PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           REGION: ${{ vars.GCP_REGION || 'us-central1' }}
-          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY || vars.ARTIFACT_REGISTRY_IMAGE }}
           NAME: ${{ inputs.migration_image_name || needs.set-env.outputs.first_name }}
           SHA: ${{ github.sha }}
         run: |
@@ -359,8 +363,9 @@ jobs:
           location: ${{ vars.GKE_REGION }}
           project_id: ${{ vars.GCP_PROJECT_ID }}
 
+      # $/ keeps this reusable workflow and helm-rollout on the same ref.
       - name: Helm rollout
-        uses: ExtensibilityAI/github-actions/helm-rollout@v2.9.2
+        uses: $/helm-rollout
         with:
           helm_chart: ${{ inputs.helm_chart }}
           helm_chart_version: ${{ inputs.helm_chart_version }}
@@ -372,7 +377,7 @@ jobs:
           helm_release_var: ${{ vars.HELM_RELEASE }}
           values_files: ${{ inputs.values_files }}
           cloud: gcp
-          image_registry: ${{ vars.IMAGE_REGISTRY }}
+          image_registry: ${{ vars.IMAGE_REGISTRY || vars.ARTIFACT_REGISTRY_IMAGE }}
           gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
           gcp_region: ${{ vars.GCP_REGION || 'us-central1' }}
           k8s_namespace: ${{ vars.K8S_NAMESPACE }}
@@ -380,5 +385,7 @@ jobs:
         env:
           GATEWAY_HOSTNAME: ${{ vars.GATEWAY_HOSTNAME }}
           ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+          # Newline-delimited key=value helm --set lines (optional GitHub env var).
+          EXTRA_HELM_SETS: ${{ vars.EXTRA_HELM_SETS }}
           GITHUB_ENVIRONMENT: ${{ needs.set-env.outputs.env }}
           ENVIRONMENT: ${{ needs.set-env.outputs.env }}

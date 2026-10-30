@@ -88,6 +88,19 @@ def extra_set_args(*, hostname: str, artifacts: str, cloud: str) -> list[str]:
     return args
 
 
+def parse_extra_helm_sets(raw: str) -> list[str]:
+    """Parse newline-delimited ``key=value`` helm --set lines from EXTRA_HELM_SETS."""
+    args: list[str] = []
+    for line in raw.splitlines():
+        item = line.strip()
+        if not item or item.startswith("#"):
+            continue
+        if "=" not in item:
+            raise SystemExit(f"EXTRA_HELM_SETS entry must be key=value, got: {item!r}")
+        args.append(item)
+    return args
+
+
 def main() -> int:
     env = os.environ
     args = image_set_args(
@@ -102,6 +115,7 @@ def main() -> int:
         artifacts=env.get("ARTIFACTS_BUCKET", ""),
         cloud=env.get("CLOUD", "gcp"),
     )
+    args += parse_extra_helm_sets(env.get("EXTRA_HELM_SETS", ""))
     for a in args:
         print(a)
     return 0
