@@ -140,6 +140,8 @@ jobs:
           app-id: ${{ secrets.INFRA_GITHUB_APP_ID }}
           private-key: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+      # ubuntu-latest (26.04+) no longer ships Pulumi; install explicitly for uv run pulumi.
+      - uses: pulumi/actions@96c7761824268174e0d2a4e8c7d75671eebd24a7 # v7.1.0
       - name: Authenticate to GCP for PyPI
         uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.4.0
         with:
@@ -220,6 +222,8 @@ jobs:
           app-id: ${{ secrets.INFRA_GITHUB_APP_ID }}
           private-key: ${{ secrets.INFRA_GITHUB_APP_PRIVATE_KEY }}
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+      # ubuntu-latest (26.04+) no longer ships Pulumi; install explicitly for uv run pulumi.
+      - uses: pulumi/actions@96c7761824268174e0d2a4e8c7d75671eebd24a7 # v7.1.0
       - name: Authenticate to GCP for PyPI
         uses: ExtensibilityAI/github-actions/setup-pypi-auth@v2.4.0
         with:
