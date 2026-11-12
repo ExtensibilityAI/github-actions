@@ -108,7 +108,14 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            echo "range=${BASE_SHA}...HEAD" >> "$GITHUB_OUTPUT"
+            # HEAD is the PR merge ref; its first parent is the base tip it was merged onto.
+            # pull_request.base.sha can be stale (base at PR open), which pulls in everything
+            # merged to the base since. Fall back to it only when HEAD is not a merge commit.
+            if [ "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 3 ]; then
+              echo "range=HEAD^1...HEAD" >> "$GITHUB_OUTPUT"
+            else
+              echo "range=${BASE_SHA}...HEAD" >> "$GITHUB_OUTPUT"
+            fi
           elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "range=HEAD~1...HEAD" >> "$GITHUB_OUTPUT"
           elif [ "${BEFORE_SHA:-}" = "0000000000000000000000000000000000000000" ] || [ -z "${BEFORE_SHA:-}" ]; then

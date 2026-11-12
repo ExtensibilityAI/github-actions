@@ -38,7 +38,14 @@ runs:
         PREFIX="${PATH_PREFIX%/}"
         EMPTY_TREE=$(git hash-object -t tree /dev/null)
         if [ "$EVENT_NAME" = "pull_request" ]; then
-          DIFF_RANGE="${BASE_SHA}...HEAD"
+          # HEAD is the PR merge ref; its first parent is the base tip it was merged onto.
+          # pull_request.base.sha can be stale (base at PR open), which pulls in everything
+          # merged to the base since. Fall back to it only when HEAD is not a merge commit.
+          if [ "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 3 ]; then
+            DIFF_RANGE="HEAD^1...HEAD"
+          else
+            DIFF_RANGE="${BASE_SHA}...HEAD"
+          fi
         elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
           if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
             DIFF_RANGE="HEAD~1...HEAD"
