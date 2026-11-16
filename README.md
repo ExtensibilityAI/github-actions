@@ -77,7 +77,7 @@ actionlint: `1.7.12` (checksum pinned in `.github/workflows/actionlint.yml`). Lo
 | `set-deploy-env` | Resolve `env` / `stack`: PR→staging, push/tag→prod, dispatch→input |
 | `docker-build-push` | WIF build/push with `:latest` cache and change detection (GAR) |
 | `docker-build-push-aws` | OIDC + ECR login, build/push with `:latest` cache and change detection |
-| `k8s-migrate` | In-cluster Job alembic (`cloud: gcp\|aws`); ConfigMap `app-env` + Secret `db`; prefers `DATABASE_DIRECT_HOST`/`PORT` when set (pooler-safe), else `DATABASE_HOST`/`PORT` |
+| `k8s-migrate` | In-cluster Job alembic (`cloud: gcp\|aws`); ConfigMap `app-env` + Secret `db`; prefers `DATABASE_DIRECT_HOST`/`PORT` when set (pooler-safe), else `DATABASE_HOST`/`PORT`. Workloads that keep DB settings in Secrets (Dagster code locations) pass `config_map_name: ''`, `db_secret_name: ''` and `env_from_secrets`; `resources_cpu` / `resources_memory` set requests = limits for namespaces whose ResourceQuota covers limits |
 | `rds-migrate` | Thin wrapper around `k8s-migrate` with `cloud: aws` (same Job / `DATABASE_DIRECT_*` behaviour) |
 | `publish-python-sdk` | Version rewrite + twine to Artifact Registry PyPI |
 | `publish-python-sdk-aws` | Version rewrite + twine to CodeArtifact PyPI |
