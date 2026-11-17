@@ -70,11 +70,13 @@ inputs:
     required: false
     default: api
   config_map_name:
-    description: ConfigMap with DATABASE_HOST / USER / NAME / etc.
+    description: >
+      ConfigMap with DATABASE_HOST / USER / NAME / etc. (envFrom). Empty skips it
+      and the DATABASE_DIRECT_* lookup.
     required: false
     default: app-env
   db_secret_name:
-    description: K8s Secret with password key
+    description: K8s Secret with password key (DATABASE_PASSWORD). Empty skips it.
     required: false
     default: db
   db_secret_key:
@@ -84,6 +86,22 @@ inputs:
     description: >
       Newline-delimited KEY=VALUE (literal env on the Job). Multiline values
       (e.g. PEMs) continue until the next KEY= line.
+    required: false
+    default: ''
+  env_from_secrets:
+    description: >
+      Newline-delimited Secret names added as envFrom secretRef, for workloads that
+      keep database settings in Secrets (e.g. Dagster code locations).
+    required: false
+    default: ''
+  resources_cpu:
+    description: CPU for the Job container (requests = limits). Empty sets none.
+    required: false
+    default: ''
+  resources_memory:
+    description: >
+      Memory for the Job container (requests = limits). Empty sets none. Namespaces
+      whose ResourceQuota covers limits need both.
     required: false
     default: ''
   job_timeout_seconds:
@@ -180,6 +198,9 @@ runs:
         SHA: ${{ github.sha }}
         DEPLOY_ENV: ${{ inputs.deploy_env }}
         EXTRA_ENV_FILE: ${{ steps.extra.outputs.extra_env_file }}
+        ENV_FROM_SECRETS: ${{ inputs.env_from_secrets }}
+        RESOURCES_CPU: ${{ inputs.resources_cpu }}
+        RESOURCES_MEMORY: ${{ inputs.resources_memory }}
       run: |
         set -euo pipefail
         SHORT="${SHA:0:8}"
@@ -189,100 +210,10 @@ runs:
 
         kubectl -n "$NS" delete job "$JOB" --ignore-not-found=true >/dev/null 2>&1 || true
 
-        python3 <<'PY'
-        import json
-        import os
-        import pathlib
-        import subprocess
-
-        ns = os.environ["NS"]
-        image = os.environ["IMAGE"]
-        cmd = os.environ["CMD"]
-        sa = os.environ["SA"]
-        cm = os.environ["CM"]
-        secret = os.environ["SECRET"]
-        secret_key = os.environ["SECRET_KEY"]
-        job = os.environ["JOB_NAME"]
-        deploy_env = os.environ["DEPLOY_ENV"]
-        extra_file = os.environ.get("EXTRA_ENV_FILE", "")
-
-        env_list = [
-            {"name": "CONFIG_ENV", "value": deploy_env},
-            {
-                "name": "DATABASE_PASSWORD",
-                "valueFrom": {
-                    "secretKeyRef": {"name": secret, "key": secret_key},
-                },
-            },
-        ]
-        # Behind a PgBouncer pooler, app-env's DATABASE_HOST/PORT point at the pooler;
-        # migrations connect to the database directly (DATABASE_DIRECT_*).
-        cm_data = json.loads(
-            subprocess.run(
-                ["kubectl", "-n", ns, "get", "configmap", cm, "-o", "json"],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout
-        ).get("data") or {}
-        if cm_data.get("DATABASE_DIRECT_HOST"):
-            print("app-env has DATABASE_DIRECT_HOST: migrating against the database directly")
-            for name, key in (
-                ("DATABASE_HOST", "DATABASE_DIRECT_HOST"),
-                ("DATABASE_PORT", "DATABASE_DIRECT_PORT"),
-            ):
-                if cm_data.get(key):
-                    env_list.append(
-                        {
-                            "name": name,
-                            "valueFrom": {"configMapKeyRef": {"name": cm, "key": key}},
-                        }
-                    )
-        if extra_file and pathlib.Path(extra_file).is_file():
-            extra = json.loads(pathlib.Path(extra_file).read_text(encoding="utf-8"))
-            for item in extra:
-                env_list.append(
-                    {"name": item["name"], "value": item["value"]},
-                )
-
-        manifest = {
-            "apiVersion": "batch/v1",
-            "kind": "Job",
-            "metadata": {
-                "name": job,
-                "namespace": ns,
-                "labels": {"app.kubernetes.io/component": "migrate"},
-            },
-            "spec": {
-                "backoffLimit": 0,
-                "ttlSecondsAfterFinished": 600,
-                "template": {
-                    "metadata": {
-                        "labels": {"app.kubernetes.io/component": "migrate"},
-                    },
-                    "spec": {
-                        "serviceAccountName": sa,
-                        "restartPolicy": "Never",
-                        "containers": [
-                            {
-                                "name": "migrate",
-                                "image": image,
-                                "imagePullPolicy": "Always",
-                                "command": ["/bin/sh", "-c", cmd],
-                                "envFrom": [{"configMapRef": {"name": cm}}],
-                                "env": env_list,
-                            }
-                        ],
-                    },
-                },
-            },
-        }
-
-        path = pathlib.Path(os.environ["RUNNER_TEMP"]) / f"{job}.json"
-        path.write_text(json.dumps(manifest), encoding="utf-8")
-        print(f"Applying Job {job} in {ns}")
-        subprocess.run(["kubectl", "apply", "-f", str(path)], check=True)
-        PY
+        MANIFEST="${RUNNER_TEMP}/${JOB}.json"
+        python3 "${{ github.action_path }}/../scripts/k8s_migrate_job.py" "$MANIFEST"
+        echo "Applying Job ${JOB} in ${NS}"
+        kubectl apply -f "$MANIFEST"
 
         TIMEOUT="${TIMEOUT:-600}"
         if ! kubectl -n "$NS" wait --for=condition=complete "job/${JOB}" --timeout="${TIMEOUT}s"; then
