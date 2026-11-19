@@ -31,6 +31,11 @@ on:
         type: string
         required: false
         default: guest
+      postgres_image:
+        description: Postgres service image (e.g. pgvector/pgvector:pg15 for pgvector).
+        type: string
+        required: false
+        default: postgres:15
       run_frontend:
         type: boolean
         required: false
@@ -67,7 +72,7 @@ jobs:
       contents: read
     services:
       postgres:
-        image: postgres:15
+        image: ${{ inputs.postgres_image }}
         env:
           POSTGRES_USER: ${{ inputs.postgres_user }}
           POSTGRES_PASSWORD: ${{ inputs.postgres_password }}
